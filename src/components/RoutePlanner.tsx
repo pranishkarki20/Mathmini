@@ -45,7 +45,7 @@ function PickLocation({ active, onPick }: { active: boolean; onPick: (latitude: 
   return null;
 }
 
-export default function RoutePlanner() {
+export default function RoutePlanner({ onRouteCalculated }: { onRouteCalculated?: (summary: string) => void }) {
   const [origin, setOrigin] = useState<Point | null>(null);
   const [destination, setDestination] = useState<Point | null>(null);
   const [routes, setRoutes] = useState<OSRMRoute[]>([]);
@@ -67,14 +67,15 @@ export default function RoutePlanner() {
   };
   const updateOrigin = (point: Point | null) => { setOrigin(point); setRoutes([]); setError(''); };
   const updateDestination = (point: Point | null) => { setDestination(point); setRoutes([]); setError(''); };
-  const calculate = async (event: FormEvent) => {
-    event.preventDefault(); setError('');
+  const calculate = async () => {
+    setError('');
     if (!origin || !destination) { setError('Search for and select both an origin and a destination.'); return; }
     setCalculating(true); setRoutes([]);
     try {
       const coordinates = [origin, destination].map(({ latitude, longitude }) => ({ latitude, longitude }));
       const result = await api.routeOSRM({ coordinates, alternatives: true });
       setRoutes(result.routes); setSelected(0);
+      if (result.routes[0]) onRouteCalculated?.(`${origin.name} → ${destination.name} · ${(result.routes[0].distanceMeters / 1000).toFixed(1)} km · OSRM estimate`);
       if (!result.routes.length) setError('OSRM returned no route. Try different locations.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Route calculation failed. The selected places are preserved so you can retry.'); }
     finally { setCalculating(false); }
@@ -95,7 +96,7 @@ export default function RoutePlanner() {
   const selectedRoute = routes[selected];
   const mapCenter: [number, number] = origin ? [origin.latitude, origin.longitude] : [12.9716, 77.5946];
 
-  return <div className="osm-route-planner"><header className="osm-route-heading"><div><span className="eyebrow">OPENSTREETMAP · OSRM</span><h2>Plan a route</h2><p>Search worldwide places in OpenStreetMap, then compare estimated driving routes.</p></div><span className="osm-data-badge"><i />OSM PLACE SEARCH · OSRM ROUTING</span></header><div className="osm-route-layout"><section className="surface osm-route-sidebar"><form onSubmit={calculate} className="osm-route-form"><div className="osm-route-point"><SearchPlace label="Starting location" point={origin} onSelect={updateOrigin} onSearch={searchPlaces} busy={searching || calculating} placeholder="City, address, landmark…" /><SearchPlace label="Destination" point={destination} onSelect={updateDestination} onSearch={searchPlaces} busy={searching || calculating} placeholder="Search any OSM place…" /><button className="osm-swap-button" type="button" onClick={swap} aria-label="Swap origin and destination"><ArrowDownUp size={14} /> Swap</button></div><button className="osm-current-location" type="button" onClick={useCurrentLocation}><LocateFixed size={14} />Use my current location <small>Requires browser permission</small></button><button type="submit" className="button button-primary button-wide osm-find-route" disabled={calculating || !origin || !destination}>{calculating ? <><RefreshCw className="spin" size={14} /> Finding route…</> : <><Route size={15} /> Find route <ArrowRight size={14} /></>}</button></form>
+  return <div className="osm-route-planner"><header className="osm-route-heading"><div><span className="eyebrow">OPENSTREETMAP · OSRM</span><h2>Plan a route</h2><p>Search worldwide places in OpenStreetMap, then compare estimated driving routes.</p></div><span className="osm-data-badge"><i />OSM PLACE SEARCH · OSRM ROUTING</span></header><div className="osm-route-layout"><section className="surface osm-route-sidebar"><div className="osm-route-form"><div className="osm-route-point"><SearchPlace label="Starting location" point={origin} onSelect={updateOrigin} onSearch={searchPlaces} busy={searching || calculating} placeholder="City, address, landmark…" /><SearchPlace label="Destination" point={destination} onSelect={updateDestination} onSearch={searchPlaces} busy={searching || calculating} placeholder="Search any OSM place…" /><button className="osm-swap-button" type="button" onClick={swap} aria-label="Swap origin and destination"><ArrowDownUp size={14} /> Swap</button></div><button className="osm-current-location" type="button" onClick={useCurrentLocation}><LocateFixed size={14} />Use my current location <small>Requires browser permission</small></button><button type="button" className="button button-primary button-wide osm-find-route" onClick={() => void calculate()} disabled={calculating || !origin || !destination}>{calculating ? <><RefreshCw className="spin" size={14} /> Finding route…</> : <><Route size={15} /> Find route <ArrowRight size={14} /></>}</button></div>
     <div className="osm-map-pin-controls"><span><MousePointer2 size={13} /> Set a point by clicking the map</span><div><button type="button" className={mapPickTarget === 'origin' ? 'selected' : ''} onClick={() => setMapPickTarget(mapPickTarget === 'origin' ? null : 'origin')}>Origin</button><button type="button" className={mapPickTarget === 'destination' ? 'selected' : ''} onClick={() => setMapPickTarget(mapPickTarget === 'destination' ? null : 'destination')}>Destination</button></div></div>
     {error && <div className="osm-route-error" role="alert">{error}</div>}{searchSource && <small className="osm-search-source">Search source: {searchSource}</small>}
     {selectedRoute && <section className="osm-route-details"><div className="osm-route-summary"><div><span>DISTANCE</span><b>{(selectedRoute.distanceMeters / 1000).toFixed(1)} km</b></div><div><span>ESTIMATED DRIVE</span><b>{Math.round(selectedRoute.durationSeconds / 60)} min</b></div></div><div className="osm-route-source"><b>Route estimate · OSRM</b><small>Retrieved {new Date(selectedRoute.retrievedAt).toLocaleString()}</small><span>Traffic is not included. No live traffic data is available from this route response.</span></div><details className="osm-directions"><summary>Route directions</summary><ol>{selectedRoute.legs.flatMap((leg) => leg.steps).filter((step) => step.name || step.type).map((step, index) => <li key={`${index}-${step.name}`}>{step.type.replaceAll('_', ' ')}{step.modifier ? ` ${step.modifier}` : ''}{step.name ? ` onto ${step.name}` : ''}<small>{(step.distanceMeters / 1000).toFixed(2)} km</small></li>)}</ol></details></section>}

@@ -1,0 +1,345 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f7fb;
+  --side: #ffffff;
+  --panel: #ffffff;
+  --panel2: #f8fafc;
+  --panel3: #f1f5f9;
+  --line: #e2e8f0;
+  --line2: #edf1f5;
+  --text: #182230;
+  --muted: #64748b;
+  --dim: #94a3b8;
+  --blue: #2563eb;
+  --cyan: #0891b2;
+  --green: #059669;
+  --amber: #b7791f;
+  --red: #dc2626;
+  --purple: #7c3aed;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1e293b;
+  background: #f4f7fb;
+}
+
+html, body, #root { background: #f4f7fb; color: #1e293b; }
+body { font-size: 14px; }
+::selection { background: #bfdbfe; color: #172554; }
+.smart-sidebar { background: #fff; border-color: #e5eaf1; box-shadow: 8px 0 28px #0f172a08; }
+.smart-brand b { color: #172033; }
+.smart-brand small, .sidebar-section-label, .nav-group>span { color: #94a3b8; }
+.smart-nav-item { color: #596579; }
+.smart-nav-item svg { color: #8290a4; }
+.smart-nav-item:hover { background: #f5f8fc; color: #1e293b; }
+.smart-nav-item.nav-selected { border-color: #dbeafe; background: #eff6ff; color: #1d4ed8; }
+.smart-nav-item.nav-selected svg { color: #2563eb; }
+.sidebar-api-state { border-color: #e5eaf1; background: #f8fafc; }
+.sidebar-api-state small, .sidebar-foot span { color: #7b8798; }
+.sidebar-foot { border-color: #e8edf3; }
+.sidebar-foot b { color: #8995a5; }
+.command-header { background: #ffffffed; border-color: #e5eaf1; box-shadow: 0 1px 3px #0f172a08; }
+.command-title h1 { color: #172033; }
+.crumb { color: #8290a3; }
+.role-select, .role-select select { background: #fff; color: #475569; }
+.role-select { border-color: #dce3eb; }
+.role-select select option { background: #fff; color: #1e293b; }
+.simulation-status { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+.button { border-color: #d8e0e9; background: #fff; color: #475569; box-shadow: 0 1px 2px #0f172a08; }
+.button:hover:not(:disabled) { border-color: #b8c7d9; background: #f8fafc; }
+.button-primary { border-color: #0f766e; background: #0f766e; color: #fff; }
+.button-primary:hover:not(:disabled) { border-color: #115e59; background: #115e59; }
+.button-danger { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.button-outline { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.button-quiet { border-color: #e2e8f0; background: #fff; color: #526176; }
+.icon-button { border-color: #dce3eb; background: #fff; color: #64748b; }
+.icon-button:hover { border-color: #bfdbfe; color: #2563eb; }
+.content-area { padding-top: 22px; }
+.data-ribbon { color: #64748b; }
+.data-ribbon svg { color: #64748b; }
+.source-status { color: #64748b; }
+.source-status.source-live { color: #15803d; }
+.source-status.source-sim { color: #a16207; }
+.welcome-row h2, .module-title-row h2 { color: #172033; }
+.welcome-row p, .module-title-row p { color: #64748b; }
+.eyebrow { color: #2563eb; }
+.metric-card { border-color: #e2e8f0; background: #fff; box-shadow: 0 1px 3px #0f172a08; }
+.metric-card span { color: #64748b; }
+.metric-card b { color: #172033; }
+.metric-card small { color: #8491a3; }
+.metric-icon { border-color: #dbeafe; background: #eff6ff; color: #2563eb; }
+.metric-icon.green { border-color: #bbf7d0; background: #f0fdf4; color: #059669; }
+.metric-icon.cyan { border-color: #cffafe; background: #ecfeff; color: #0891b2; }
+.metric-icon.amber { border-color: #fde68a; background: #fffbeb; color: #b7791f; }
+.metric-icon.red { border-color: #fecaca; background: #fef2f2; color: #dc2626; }
+.surface { border-color: #e2e8f0; background: #fff; box-shadow: 0 2px 8px #0f172a08; }
+.surface-head h2, .surface-head h3, .section-heading h3, .network-tool-section h3 { color: #1e293b; }
+.surface-head p, .network-tool-section p { color: #64748b; }
+.surface-title>svg { color: #2563eb; }
+.map-real-pill, .mini-state, .count-pill { border-color: #dbeafe; background: #eff6ff; color: #1d4ed8; }
+.map-real-pill { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+.map-filter-bar .filter-chip { border-color: #e2e8f0; background: #fff; color: #64748b; }
+.map-filter-bar .filter-chip.filter-selected { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.filter-divider { background: #e2e8f0; }
+.map-traffic-source, .data-ribbon-right { color: #64748b; }
+.leaflet-map-shell { border-color: #dbe3ec; background: #f8fafc; }
+.leaflet-tooltip { border-color: #cbd5e1!important; background: #fff!important; color: #1e293b!important; box-shadow: 0 3px 12px #0f172a22!important; }
+.leaflet-tooltip:before { border-top-color: #cbd5e1!important; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #fff!important; color: #1e293b!important; }
+.map-popup span, .map-popup p { color: #64748b; }
+.map-popup button { border-color: #99f6e4; background: #f0fdfa; color: #0f766e; }
+.source-card, .road-detail-card, .mini-route-panel, .incident-mini, .source-mini { border-color: #e2e8f0; background: #fff; }
+.source-card-icon { background: #ecfeff; color: #0891b2; }
+.source-card b, .source-card p, .source-card div, .section-heading, .data-source-row b { color: #334155; }
+.panel-overline { color: #64748b; }
+.text-link { color: #2563eb; }
+.incident-mini-row, .source-mini .data-source-row { border-color: #edf1f5; }
+.incident-mini-row b { color: #334155; }
+.incident-mini-row small, .data-source-row small, .last-update { color: #778499; }
+.severity-label { border-color: #fde68a; background: #fffbeb; color: #a16207; }
+.severity-label.severity-high { border-color: #fed7aa; background: #fff7ed; }
+.severity-label.severity-critical { border-color: #fecaca; background: #fef2f2; }
+.severity-label.severity-low { border-color: #bbf7d0; background: #f0fdf4; }
+.empty-hint { color: #64748b; }
+.provider-mark.osm { background: #dcfce7; color: #15803d; }
+.provider-mark.sim { background: #fef3c7; color: #92400e; }
+.provider-state { color: #15803d; }
+.provider-state.provider-sim { color: #a16207; }
+.road-detail-heading strong, .road-detail-metrics b { color: #1e293b; }
+.road-detail-metrics>div { border-color: #e8edf3; background: #f8fafc; }
+.road-detail-metrics span, .detail-source { color: #64748b; }
+.message-banner, .global-simulation-note, .analytics-provenance { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+.smart-footer { border-color: #e2e8f0; color: #64748b; }
+.smart-footer a { color: #2563eb; }
+.toast-message { border-color: #bbf7d0; background: #f0fdf4; color: #166534; box-shadow: 0 8px 28px #0f172a1a; }
+
+/* Shared form controls across every module */
+input, select, textarea, .form-field input, .form-field select, .form-field textarea,
+.sensor-search-row>input, .sensor-search-row>select, .sensor-radius input,
+.sensor-cost-panel>.surface-head select, .sensor-custom-cost input {
+  border-color: #d5dee8 !important;
+  background-color: #fff !important;
+  color: #1e293b !important;
+}
+input::placeholder, textarea::placeholder { color: #94a3b8; }
+select option { background: #fff; color: #1e293b; }
+.form-field span, .form-field label { color: #526176; }
+.form-field small, .form-tip { color: #64748b; }
+
+/* Route planner, network analysis, signal and sensor panels */
+.route-result, .route-card, .route-options, .route-result-card, .route-detail,
+.sensor-plan-card, .sensor-cost-summary>div, .osm-route-source,
+.osm-directions, .osm-map-panel, .osm-alternative, .network-map-panel,
+.network-tool-section, .network-route-impact, .network-junction-options,
+.network-alternative, .signal-result, .signal-card, .analytics-card,
+.chart-card, .incident-card, .sensor-custom-cost, .osm-route-sidebar {
+  border-color: #e2e8f0;
+  background-color: #fff;
+  color: #334155;
+}
+.osm-map-header, .network-map-title { border-color: #e2e8f0; color: #334155; }
+.osm-map-header small, .network-map-title small { color: #64748b; }
+.osm-map-canvas, .network-leaflet-map { background: #f1f5f9; }
+.osm-route-source b, .osm-alternative b, .network-map-title b,
+.sensor-plan-card b, .sensor-cost-summary b, .sensor-report-detail h3,
+.sensor-report-sites>b, .sensor-report-sites span { color: #1e293b; }
+.osm-route-source small, .osm-route-source span, .osm-directions,
+.osm-alternative small, .sensor-plan-card span, .sensor-plan-card small,
+.sensor-cost-summary span, .sensor-report-detail p, .sensor-report-detail a,
+.sensor-report-sites small, .form-tip, .network-tool-section>small { color: #64748b; }
+.osm-alternative { background: #fff; color: #334155; }
+.osm-alternative.selected { border-color: #93c5fd; background: #eff6ff; }
+.sensor-suggestion, .sensor-selected-row { border-color: #edf1f5; color: #334155; }
+.sensor-suggestion b, .sensor-selected-row span { color: #1e293b; }
+.sensor-suggestion small, .sensor-selected-row small { color: #64748b; }
+.sensor-selected-row button, .sensor-custom-cost button { border-color: #dce3eb; background: #fff; color: #475569; }
+.sensor-cost-panel { padding: 16px; }
+.sensor-cost-summary>div { background: #f8fafc; }
+.sensor-report-detail { border-color: #e2e8f0; }
+.sensor-report-sites>div { border-color: #e2e8f0; }
+.sensor-plan-card { border-radius: 9px; box-shadow: 0 1px 2px #0f172a08; }
+.sensor-plan-card:hover { border-color: #93c5fd; background: #f8fbff; }
+.network-junction-options { border-color: #e2e8f0; }
+.network-junction-options label { color: #334155; }
+.route-result-card, .route-result-compact, .panel-form, .step-trace, .trace-list,
+.trace-row, .incident-list, .incident-row, .incident-resolved, .form-surface,
+.sensor-explainer, .candidate-site, .savings-banner, .algorithm-trace-list,
+.algorithm-trace-row, .sensor-edge-table, .sensor-connection-list,
+.sensor-connection-row, .timing-recommendation, .recommendation-note,
+.analytics-kpi, .chart-surface, .event-table, .event-table-row,
+.education-card, .validation-strip, .briefing-modal {
+  border-color: #e2e8f0;
+  background-color: #fff;
+  color: #334155;
+}
+.route-result-card h2, .route-result-card h3, .route-result-card b,
+.route-result-compact b, .panel-form h2, .panel-form h3,
+.incident-row b, .candidate-site b, .sensor-connection-row b,
+.signal-result b, .chart-surface h2, .chart-surface h3,
+.event-table-head, .event-table-row b, .education-card h3,
+.briefing-modal h2, .briefing-modal h3 { color: #1e293b; }
+.route-result-card p, .route-result-card small, .route-result-compact small,
+.step-trace, .trace-row, .incident-row small, .incident-status,
+.form-tip-text, .sensor-explainer p, .candidate-site small,
+.sensor-connection-row small, .timing-recommendation p,
+.recommendation-note, .chart-data-label, .event-table-row,
+.education-card p, .validation-strip, .briefing-body { color: #64748b; }
+.trace-row, .incident-row, .sensor-connection-row, .event-table-row { border-color: #edf1f5; }
+.trace-highlight, .validation-chip { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.savings-banner { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.incident-kind-icon { background: #f1f5f9; color: #475569; }
+.incident-status.resolved { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+.step-count { border-color: #dbeafe; background: #eff6ff; color: #1d4ed8; }
+.briefing-backdrop { background: #0f172a66; }
+.briefing-modal { box-shadow: 0 24px 80px #0f172a2b; }
+.briefing-tags span { border-color: #e2e8f0; background: #f8fafc; color: #526176; }
+.analytics-kpi-grid .kpi-icon { background: #eff6ff; color: #2563eb; }
+.analytics-kpi-grid .kpi-icon.orange { background: #fff7ed; color: #c2410c; }
+.analytics-kpi-grid .kpi-icon.green { background: #f0fdf4; color: #15803d; }
+.analytics-kpi-grid .kpi-icon.purple { background: #f5f3ff; color: #7c3aed; }
+.event-table-head { background: #f8fafc; }
+.network-route-impact { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.network-route-impact small { color: #4b7561; }
+.network-route-impact.impact-disconnected { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.closure-status { color: #a16207; }
+.network-critical-note svg { color: #b7791f; }
+.signal-result, .route-result-top { color: #334155; }
+.route-result-top strong { color: #047857; }
+.route-result-icon { border-color: #a7f3d0; background: #ecfdf5; color: #059669; }
+.route-place>b { border-color: #6ee7b7; background: #ecfdf5; color: #047857; }
+.route-place>small { color: #64748b; }
+.route-place>i { background: #a7f3d0; }
+.route-result-meta { border-color: #d1fae5; color: #526176; }
+.route-result-meta .simulation-label { border-color: #fde68a; color: #a16207; }
+.sensor-planning-search p, .sensor-planning-search>small { color: #64748b; }
+.sensor-planning-search h2 { color: #172033; }
+.sensor-site-name { color: #1e293b; }
+.sensor-site-name+small { color: #64748b; }
+.leaflet-control-attribution { color: #475569!important; background: #ffffffd9!important; }
+
+@media (max-width: 960px) {
+  .smart-sidebar { box-shadow: 12px 0 40px #0f172a22; }
+  .sidebar-backdrop { background: #0f172a55; }
+}
+@media (max-width: 640px) {
+  .content-area { padding: 14px 12px 0; }
+  .command-header { padding: 0 12px; }
+  .surface-head { padding: 12px; }
+}
+
+.network-place-search { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.network-place-search input { flex: 1 1 280px; min-width: 160px; height: 36px; padding: 0 10px; border: 1px solid #d5dee8; border-radius: 6px; }
+.network-place-results { display: grid; gap: 4px; max-height: 220px; overflow: auto; margin: -4px 0 10px; padding: 5px; border: 1px solid #e2e8f0; border-radius: 8px; background: white; }
+.network-place-results button { padding: 8px 10px; border: 0; border-radius: 5px; background: #fff; color: #334155; text-align: left; cursor: pointer; }
+.network-place-results button:hover { background: #eff6ff; color: #1d4ed8; }
+.network-metrics { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
+.network-map-legend .critical-road { height: 4px; background: #a855f7; }
+.dashboard-intro, .dashboard-data-note { padding-bottom: 10px; }
+.dashboard-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 14px; }
+.platform-dashboard .metric-grid { grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); }
+.activity-row { display: block; padding: 6px 0; border-top: 1px solid #edf1f5; color: #475569; }
+.network-report-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.route-comparison-cards { display: grid; gap: 7px; }
+.route-comparison-cards article { display: grid; gap: 5px; padding: 9px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
+.route-comparison-cards b { color: #1e293b; font-size: 10px; }
+.route-comparison-cards span { color: #334155; font-size: 9px; line-height: 1.6; }
+.route-comparison-cards small { color: #64748b; font-size: 8px; }
+
+/* Status pill muted state */
+.simulation-status.status-muted {
+  border-color: #e2e8f0;
+  background: #f1f5f9;
+  color: #64748b;
+}
+.simulation-status.status-muted .status-dot {
+  background: #94a3b8;
+  box-shadow: none;
+}
+
+/* Metric icons */
+.metric-icon.blue { border-color: #dbeafe; background: #eff6ff; color: #2563eb; }
+
+/* Map legend in light theme */
+.network-map-legend { color: #475569; }
+.network-map-legend span { display: flex; align-items: center; gap: 5px; color: #475569; }
+.sensor-suggested-dot { width: 8px; height: 8px; border-radius: 50%; background: #f4a642; display: inline-block; }
+.sensor-selected-dot { width: 8px; height: 8px; border-radius: 50%; background: #24bd88; display: inline-block; }
+.sensor-network-line { width: 14px; height: 4px; border-radius: 2px; background: #ed8b48; display: inline-block; }
+
+/* Route Planner light theme enhancements */
+.osm-data-badge { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+.osm-data-badge i { background: #22c55e; }
+.osm-search-form button, .osm-swap-button { border-color: #d8e0e9; background: #ffffff; color: #475569; }
+.osm-search-form button:hover:not(:disabled), .osm-swap-button:hover:not(:disabled) { border-color: #cbd5e1; background: #f8fafc; color: #1e293b; }
+.osm-place-results { border-color: #cbd5e1; background: #ffffff; box-shadow: 0 10px 25px #0f172a15; }
+.osm-place-results button { border-bottom: 1px solid #edf1f5; color: #1e293b; }
+.osm-place-results button:hover { background: #eff6ff; color: #1d4ed8; }
+.osm-place-results b { color: #1e293b; font-size: 11px; }
+.osm-place-results small { color: #64748b; font-size: 10px; }
+.osm-place-results span { color: #94a3b8; font-size: 9px; }
+.osm-map-pin-controls { border-color: #e2e8f0; background: #f8fafc; }
+.osm-map-pin-controls>span { color: #64748b; font-size: 11px; }
+.osm-map-pin-controls button { border-color: #d8e0e9; background: #ffffff; color: #475569; font-size: 11px; }
+.osm-map-pin-controls button.selected { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+.osm-route-heading h2 { color: #172033; }
+.osm-route-heading p { color: #64748b; }
+.osm-search-place>label { color: #475569; font-size: 11px; }
+.osm-route-summary>div { border-color: #e2e8f0; background: #f8fafc; }
+.osm-route-summary span { color: #64748b; }
+.osm-route-summary b { color: #172033; }
+.osm-directions ol { color: #334155; }
+.osm-directions li small { color: #64748b; }
+.osm-alternative-heading { color: #1e293b; }
+.osm-alternative-heading small { color: #64748b; }
+.osm-route-footer { color: #64748b; }
+.osm-search-error { color: #dc2626; font-size: 11px; }
+.osm-route-error { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+
+/* Sensor Infrastructure (MVP) light theme */
+.sensor-mvp { display: grid; gap: 14px; }
+.sensor-mvp-header h2 { color: #172033; }
+.sensor-mvp-header p { color: #64748b; }
+.sensor-mvp-area { background: #fff; border-color: #e2e8f0; }
+.sensor-step>span { background: #0f766e; color: #fff; }
+.sensor-step b { color: #1e293b; font-size: 13px; }
+.sensor-step small { color: #64748b; font-size: 11px; }
+.sensor-mvp-leaflet { background: #f8fafc; }
+.sensor-mvp-section { border-bottom: 1px solid #e2e8f0; }
+.sensor-mvp-site { border-bottom: 1px solid #edf1f5; color: #1e293b; background: transparent; }
+.sensor-mvp-site:hover { background: #f8fafc; color: #1e293b; }
+.sensor-mvp-site.is-selected { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.sensor-mvp-site>span { color: #059669; font-weight: 700; }
+.sensor-mvp-site b { color: #1e293b; font-size: 11px; }
+.sensor-mvp-site small { color: #64748b; font-size: 10px; }
+.sensor-mvp-metrics>div { border-color: #e2e8f0; background: #f8fafc; }
+.sensor-mvp-metrics span { color: #64748b; font-size: 11px; }
+.sensor-mvp-metrics b { color: #172033; font-size: 14px; font-weight: 700; }
+.sensor-mvp-result p { color: #64748b; font-size: 11px; }
+.sensor-mvp-selected>div { border-bottom: 1px solid #edf1f5; color: #1e293b; }
+.sensor-mvp-selected b { color: #1e293b; font-size: 11px; }
+.sensor-mvp-selected button { border-color: #dce3eb; background: #fff; color: #64748b; }
+.sensor-mvp-selected button:hover { border-color: #fecaca; background: #fef2f2; color: #dc2626; }
+.sensor-mvp-controls .form-field select,
+.sensor-mvp-controls .form-field input { border-color: #d5dee8 !important; background: #fff !important; color: #1e293b !important; }
+
+/* Analytics Dashboard light theme */
+.analytics-page { display: grid; gap: 14px; }
+.analytics-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; gap: 10px; color: #64748b; }
+.analytics-empty svg { color: #2563eb; }
+.analytics-empty h3 { margin: 0; color: #1e293b; font-size: 16px; font-weight: 600; }
+.analytics-empty p { max-width: 480px; margin: 0; color: #64748b; font-size: 13px; line-height: 1.5; }
+.analytics-rank-list { display: grid; gap: 8px; padding: 12px 14px; }
+.analytics-rank-list>div { display: grid; grid-template-columns: 22px minmax(80px, 140px) 1fr 80px; align-items: center; gap: 10px; font-size: 12px; }
+.analytics-rank-list span { color: #94a3b8; font-size: 11px; text-align: center; }
+.analytics-rank-list b { color: #1e293b; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analytics-rank-list i { height: 7px; border-radius: 4px; background: linear-gradient(90deg, #3b82f6, #06b6d4); display: block; min-width: 4px; }
+.analytics-rank-list small { color: #64748b; font-size: 11px; text-align: right; white-space: nowrap; }
+
+@media print {
+  .network-place-search, .network-place-results, .network-report-actions,
+  .network-tools, .smart-sidebar, .command-header, .smart-footer,
+  .global-simulation-note { display: none !important; }
+  .smart-main { margin: 0 !important; }
+  .content-area { max-width: none !important; padding: 0 !important; }
+  .network-explorer-grid { display: block !important; }
+  .network-map-panel, .surface { break-inside: avoid; box-shadow: none !important; }
+  .network-leaflet-map { height: 430px !important; min-height: 430px !important; }
+}

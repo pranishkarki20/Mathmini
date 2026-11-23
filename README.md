@@ -1,14 +1,14 @@
 # SmartFlow Road Network Optimization Platform
 
-SmartFlow is a practical road-network operations prototype built on OpenStreetMap. It combines a Leaflet map, user-submitted Nominatim place searches, OSRM driving estimates, cached Overpass extracts, temporary road-closure scenarios, and sensor-connectivity planning. It does not claim to provide live traffic conditions.
+SmartFlow explores real OpenStreetMap road networks and supports route estimates, graph connectivity analysis, road-closure scenarios, sensor-site planning, and editable infrastructure cost estimates. It does not provide live traffic measurements or control traffic signals.
 
-## Current capabilities
+## Modules
 
-- Search for arbitrary mapped places, select a start and destination, use an optional device location, and view OSRM route alternatives on an OpenStreetMap map.
-- Explore a selected map area and load its actual OSM roads from Overpass. Extracts are bounded and cached locally.
-- Click roads to simulate closures, then compare shortest-distance connectivity before and after closures on the downloaded road graph. Critical junctions and disconnected areas are summarized in plain language.
-- Plan candidate monitoring connections and view estimated installation costs. Estimates are explicitly labeled.
-- Manage incident reports, view network analytics, and export an operations JSON report.
+- **Dashboard:** service status and summary information where a real OSM network extract is available. No fictional road counts are substituted when services are offline.
+- **Road network analysis:** search for a city, street, landmark or address; choose an area by moving and zooming the Leaflet map; load its roads from Overpass; inspect road classes, junctions, connected components, articulation points and bridge links; compare shortest-distance routes before and after simulated closures; save and restore closure scenarios. A CSV report and print-to-PDF view are available.
+- **Route planner:** search any mapped origin and destination, select map pins, compare OSRM route alternatives, and review distance and estimated duration. These routes come from OSRM, not SmartFlow's graph algorithm.
+- **Sensor infrastructure:** load a selected area, pick junctions on the map, review degree-based recommendations, calculate Prim/Kruskal minimum spanning connections, configure cost assumptions, save the plan, and export CSV or print/PDF.
+- **Network analytics:** calculate graph node/edge counts, mapped distance, connected components, high-degree nodes and road-class distributions from a real OSM extract.
 
 ## Local setup
 
@@ -23,15 +23,12 @@ python -m venv .venv
 pip install -r requirements.txt
 Copy-Item .env.example .env
 python manage.py migrate
-python manage.py seed_demo
 python manage.py runserver
 ```
 
-The API runs at `http://127.0.0.1:8000/api/`. SQLite is the local default. Set `DATABASE_URL` for PostgreSQL. `OSRM_BASE_URL` can point at a self-hosted OSRM instance; the default public OSRM demo endpoint has no production SLA.
+The API runs at `http://127.0.0.1:8000/api/`. SQLite is the local default. Set `DATABASE_URL` for PostgreSQL. `OSRM_BASE_URL` can point at a self-hosted OSRM instance; the public demo endpoint has no production SLA.
 
 ### Frontend
-
-In a second terminal at the project root:
 
 ```powershell
 Copy-Item .env.example .env
@@ -39,24 +36,16 @@ npm ci
 npm run dev
 ```
 
-Set `VITE_API_BASE_URL` to the Django API URL if it differs from the local default. Vercel can use `npm ci`, `npm run build`, and `dist` as the output directory. Deploy Django separately and configure its CORS origins for the frontend domain.
+Set `VITE_API_BASE_URL` if the Django API differs from the local default. Vercel can use `npm ci`, `npm run build`, and `dist` as the output directory. Deploy Django separately and configure CORS for the frontend domain.
 
-## Public service limits and data accuracy
+## Data and service limits
 
-- Nominatim search is submitted explicitly; the application does not send autocomplete requests. The backend caches searches and spaces uncached public Nominatim requests to at least one second apart. For a busy production service, use a contracted or self-hosted geocoder.
-- OSRM durations are routing estimates from the configured road profile, not traffic-aware durations. The UI states this alongside the result. The public OSRM demo service is intended for demonstration; use a managed or self-hosted deployment for operational use.
-- Overpass area extracts are capped at 0.12 degrees per side and cached under `backend/data/areas`. OSM road geometry does not include live speeds or incident reports.
-- A simulated road closure affects only the extracted graph route calculation. It does not alter OSRM's hosted road graph or represent an official road closure.
-- Estimated sensor installation costs are planning inputs, not vendor quotations. Configure and review cost data before using it for a budget.
-- OpenStreetMap data is © OpenStreetMap contributors and available under the Open Database License. Preserve attribution and comply with the relevant service policies.
-
-## API endpoints
-
-- `GET /api/places/search/?q=...` — user-submitted place search via Nominatim.
-- `POST /api/routes/osrm/` — OSRM route and alternatives for supplied coordinates.
-- `GET /api/network/area/?south=...&west=...&north=...&east=...` — fetch or reuse a cached OSM road graph extract.
-- `POST /api/network/area/route/` — calculate a shortest-distance path on that extract with optional closed road IDs.
-- `POST /api/incidents/`, `GET /api/incidents/` — incident management.
+- Nominatim search happens only when submitted. The backend caches searches and spaces uncached requests to respect its public usage policy. Use a contracted or self-hosted geocoder for production traffic.
+- Overpass extracts are bounded to at most 0.12 degrees per side and cached under `backend/data/areas`. Large regions require multiple extracts.
+- OSRM durations are profile estimates, not traffic-aware or verified live travel times. Graph route durations use road-class speed assumptions.
+- Simulated closures affect only the downloaded graph and are not official road closures. Sensor recommendations use road graph properties, not traffic demand or existing device data.
+- Cost values are editable user-entered assumptions, not verified supplier prices. Use quotes before budgeting or procurement.
+- OpenStreetMap data is © OpenStreetMap contributors under the Open Database License. Keep attribution visible and comply with provider policies.
 
 ## Checks
 

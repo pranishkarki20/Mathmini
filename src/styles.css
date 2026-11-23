@@ -16,3 +16,65 @@
 .network-junction-options label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .network-junction-options input { accent-color: #a75be8; }
 .network-junction-options + small { display: block; margin: 8px 0; }
+.sensor-planning-page{display:grid;gap:12px}.sensor-planning-search{display:grid;gap:10px;padding:14px}.sensor-planning-search h2{margin:4px 0;font-size:21px}.sensor-planning-search p{margin:0;color:#95a5ba;font-size:11px}.sensor-planning-search>small{color:#91a1b7;font-size:9px}.sensor-search-row{display:flex;flex-wrap:wrap;gap:7px;align-items:center}.sensor-search-row>input{flex:1 1 230px;min-width:180px;height:36px;padding:0 10px;border:1px solid #34465b;border-radius:5px;background:#111a27;color:#e7eef7}.sensor-search-row>select{min-width:180px;max-width:330px;height:36px;padding:0 8px;border:1px solid #34465b;border-radius:5px;background:#111a27;color:#e7eef7}.sensor-radius{display:flex;align-items:center;gap:5px;color:#9eafc3;font-size:10px}.sensor-radius input{width:65px;height:32px;padding:0 5px;border:1px solid #34465b;border-radius:5px;background:#111a27;color:#e7eef7}.sensor-planning-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,.8fr);gap:11px;align-items:start}.sensor-planning-map{min-width:0;overflow:hidden}.sensor-plan-map{width:100%;height:min(68vh,620px);min-height:390px}.sensor-planning-controls{position:sticky;top:70px;display:grid;gap:0;padding:0 12px}.sensor-planning-controls .network-tool-section{padding:12px 0}.sensor-suggestion,.sensor-selected-row{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:7px;width:100%;padding:7px 5px;border:0;border-bottom:1px solid #29384b;background:transparent;color:#dce7f4;text-align:left}.sensor-suggestion{cursor:pointer}.sensor-suggestion>span{color:#62d0a7}.sensor-suggestion b,.sensor-selected-row span{font-size:9px}.sensor-suggestion small,.sensor-selected-row small{color:#8497ac;font-size:8px}.sensor-selected-row{grid-template-columns:1fr auto}.sensor-selected-row>span{display:grid;gap:3px}.sensor-selected-row button,.sensor-custom-cost button{display:grid;place-items:center;width:27px;height:27px;border:1px solid #34465b;border-radius:4px;background:#172438;color:#c6d6e8;cursor:pointer}.sensor-planning-controls .form-field{gap:4px}.sensor-planning-controls .form-field input,.sensor-planning-controls .form-field select{height:31px;font-size:9px}.sensor-cost-panel{padding:13px}.sensor-cost-panel>.surface-head{align-items:center}.sensor-cost-panel>.surface-head select{height:32px;border:1px solid #34465b;border-radius:5px;background:#111a27;color:#e7eef7}.sensor-cost-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.sensor-cost-fields .form-field{gap:4px}.sensor-cost-fields input,.sensor-cost-fields select{min-width:0}.sensor-cost-actions{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}.sensor-custom-cost{display:flex;gap:6px;margin:7px 0}.sensor-custom-cost input{min-width:0;height:32px;padding:0 7px;border:1px solid #34465b;border-radius:5px;background:#111a27;color:#e7eef7}.sensor-custom-cost input:first-child{flex:1}.sensor-cost-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.sensor-cost-summary>div{display:grid;gap:4px;padding:9px;border:1px solid #2b3b50;border-radius:5px;background:#141f2d}.sensor-cost-summary span{color:#8496ac;font-size:8px}.sensor-cost-summary b{color:#e2ecf8;font-size:12px}.sensor-planning-page .form-tip{display:flex;gap:5px;margin-top:10px;color:#8397ad;font-size:8px;line-height:1.5}@media(max-width:980px){.sensor-planning-layout{grid-template-columns:1fr}.sensor-planning-controls{position:relative;top:auto;grid-template-columns:1fr 1fr;gap:0 14px}.sensor-cost-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.sensor-plan-map{height:48vh;min-height:300px}.sensor-planning-controls{grid-template-columns:1fr}.sensor-cost-fields,.sensor-cost-summary{grid-template-columns:1fr 1fr}.sensor-cost-actions{display:grid;grid-template-columns:1fr 1fr}}
+@media print{.smart-sidebar,.command-header,.smart-footer,.global-simulation-note,.sensor-cost-actions,.button{display:none!important}.smart-main{margin:0!important}.content-area{padding:0!important}.sensor-planning-page{color:#111!important}.sensor-planning-page .surface{break-inside:avoid;background:#fff!important;color:#111!important;border-color:#aaa!important}.sensor-planning-page h2,.sensor-planning-page h3,.sensor-planning-page b,.sensor-planning-page span,.sensor-planning-page p,.sensor-planning-page small{color:#111!important}.sensor-plan-map{height:380px!important}.sensor-planning-controls{position:static!important}}
+.sensor-plan-comparison{padding:13px}.sensor-plan-comparison>.surface-head{align-items:end}.sensor-plan-comparison .form-field{min-width:110px}.sensor-plan-comparison .form-field input{height:31px}.sensor-plan-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.sensor-plan-card{display:grid;align-content:start;gap:7px;min-width:0;padding:10px;border:1px solid #2e4056;border-radius:6px;background:#131f2d;color:#dce7f4;text-align:left;cursor:pointer}.sensor-plan-card:hover{border-color:#568ec7}.sensor-plan-card b{font-size:10px}.sensor-plan-card span,.sensor-plan-card small{color:#879bb2;font-size:8px;line-height:1.4}.sensor-plan-card strong{color:#9ed9bd;font-size:12px}@media(max-width:980px){.sensor-plan-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.sensor-plan-cards{grid-template-columns:1fr}}
+.sensor-site-name{width:100%;padding:0;border:0;background:transparent;color:#dce7f4;font-size:9px;font-weight:650;outline:none}.sensor-site-name:focus{border-bottom:1px solid #568ec7}.sensor-site-name+small{display:block;margin-top:3px;color:#8497ac;font-size:8px}
+
+/* Sensor infrastructure MVP */
+.sensor-mvp{display:grid;gap:12px}
+.sensor-mvp-header{display:flex;align-items:center;justify-content:space-between;padding:16px}
+.sensor-mvp-header h2{margin:4px 0 3px;font-size:22px}
+.sensor-mvp-header p{margin:0;color:#95a5ba;font-size:12px}
+.sensor-mvp-area{display:grid;gap:10px;padding:14px}
+.sensor-step{display:flex;align-items:center;gap:9px}
+.sensor-step>span{display:grid;place-items:center;width:27px;height:27px;flex:none;border-radius:50%;background:#1f6c58;color:#fff;font-size:11px;font-weight:800}
+.sensor-step>div{display:grid;gap:2px}
+.sensor-step b{font-size:12px}
+.sensor-step small{color:#8d9eb2;font-size:9px}
+.sensor-mvp-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,.75fr);gap:12px;align-items:start}
+.sensor-mvp-map{min-width:0;overflow:hidden}
+.sensor-mvp-leaflet{width:100%;height:min(64vh,560px);min-height:390px}
+.sensor-mvp-controls{position:sticky;top:70px;display:grid;gap:0;padding:0 13px}
+.sensor-mvp-section{display:grid;gap:9px;padding:13px 0;border-bottom:1px solid #29384b}
+.sensor-mvp-suggestions{display:grid}
+.sensor-mvp-site{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:7px;width:100%;min-height:38px;padding:6px 4px;border:0;border-bottom:1px solid #29384b;background:transparent;color:#dce7f4;text-align:left;cursor:pointer}
+.sensor-mvp-site:hover,.sensor-mvp-site.is-selected{background:#182839}
+.sensor-mvp-site>span{color:#62d0a7;text-align:center}
+.sensor-mvp-site b{font-size:10px}
+.sensor-mvp-site small{color:#8497ac;font-size:9px}
+.sensor-mvp-controls .form-field{gap:5px}
+.sensor-mvp-controls .form-field select,.sensor-mvp-controls .form-field input{height:36px;font-size:10px}
+.sensor-method-choice{display:grid;gap:6px}
+.sensor-choice-label{color:#a9b7c8;font-size:9px;font-weight:700}
+.sensor-choice{display:grid;gap:3px;width:100%;padding:9px 10px;border:1px solid #34465b;border-radius:7px;background:#111a27;color:#dce7f4;text-align:left;cursor:pointer}
+.sensor-choice:hover{border-color:#568ec7}
+.sensor-choice.is-selected{border-color:#35c69a;background:#17372f;box-shadow:inset 3px 0 0 #35c69a}
+.sensor-choice b{font-size:11px}
+.sensor-choice span{color:#9fb0c2;font-size:9px;line-height:1.4}
+.sensor-mvp-result{display:grid;gap:10px;padding:13px 0}
+.sensor-mvp-metrics{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.sensor-mvp-metrics>div{display:grid;gap:3px;padding:9px;border:1px solid #2b3b50;border-radius:5px;background:#141f2d}
+.sensor-mvp-metrics span{color:#8496ac;font-size:9px}
+.sensor-mvp-metrics b{font-size:12px}
+.sensor-mvp-result p{margin:0;color:#91a1b7;font-size:9px;line-height:1.5}
+.sensor-mvp-actions{display:flex;gap:7px}
+.sensor-mvp-actions>*{flex:1}
+.sensor-mvp-selected{display:grid;gap:5px;padding:12px 0}
+.sensor-mvp-selected>div{display:flex;align-items:center;justify-content:space-between;padding:7px;border-bottom:1px solid #29384b}
+.sensor-mvp-selected b{font-size:9px}
+.sensor-mvp-selected button{display:grid;place-items:center;width:27px;height:27px;border:1px solid #34465b;border-radius:4px;background:#172438;color:#c6d6e8;cursor:pointer}
+@media(max-width:980px){
+  .sensor-mvp-layout{grid-template-columns:1fr}
+  .sensor-mvp-controls{position:relative;top:auto}
+  .sensor-mvp-leaflet{height:48vh;min-height:320px}
+}
+@media(max-width:640px){
+  .sensor-mvp-header{align-items:flex-start;gap:10px}
+  .sensor-mvp-header p{font-size:10px}
+  .sensor-mvp-header .button{flex:none}
+  .sensor-mvp-layout{gap:8px}
+  .sensor-mvp-metrics{grid-template-columns:1fr 1fr}
+  .sensor-mvp-actions{display:grid}
+}
+.sensor-report-detail{display:grid;gap:6px;margin-top:13px;padding-top:11px;border-top:1px solid #2b3b4e}.sensor-report-detail h3{margin:0;font-size:11px;color:#dce7f4}.sensor-report-detail p,.sensor-report-detail a{margin:0;color:#879bb2;font-size:8px;line-height:1.5}.sensor-report-detail a{color:#8bbcff}.sensor-report-sites{display:grid;gap:5px;margin-top:4px}.sensor-report-sites>b{font-size:9px;color:#cbd8e7}.sensor-report-sites>div{display:grid;gap:2px;padding:6px;border:1px solid #2b3b50;border-radius:4px}.sensor-report-sites span{font-size:9px;color:#e2ecf8}.sensor-report-sites small{font-size:8px;color:#8497ac}
