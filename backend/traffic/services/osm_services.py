@@ -19,7 +19,7 @@ class GeoServiceError(Exception):
 def search_nominatim(query):
     global _last_nominatim_request
     normalized = ' '.join(query.split())[:200]
-    key = 'nominatim-search:' + hashlib.sha256(normalized.casefold().encode()).hexdigest()
+    key = 'nominatim-search-india:' + hashlib.sha256(normalized.casefold().encode()).hexdigest()
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -31,6 +31,7 @@ def search_nominatim(query):
         try:
             response = requests.get(NOMINATIM_URL, params={
                 'q': normalized, 'format': 'jsonv2', 'limit': 6, 'addressdetails': 1,
+                'countrycodes': 'in',
             }, headers={
                 'User-Agent': settings.NOMINATIM_USER_AGENT,
                 'Accept': 'application/json',

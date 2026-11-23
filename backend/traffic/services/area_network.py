@@ -24,6 +24,8 @@ def _validate_bbox(bbox):
         raise AreaNetworkError('Map bounds must be numeric coordinates.') from error
     if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
         raise AreaNetworkError('Map bounds are invalid. Pan and zoom to a smaller area, then retry.')
+    if south < 6.5 or north > 37.5 or west < 68.0 or east > 97.5:
+        raise AreaNetworkError('Road Network Analysis is currently available only within India.')
     if north - south > 0.12 or east - west > 0.12:
         raise AreaNetworkError('Select a smaller area (maximum 0.12° in each direction) to keep OpenStreetMap extracts manageable.')
     return [round(south, 5), round(west, 5), round(north, 5), round(east, 5)]

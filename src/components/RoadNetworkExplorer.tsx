@@ -4,9 +4,9 @@ import { GeoJSON, MapContainer, Marker, Popup, Polyline, TileLayer, useMap, useM
 
 import type { Layer } from 'leaflet';
 
-import { Activity, AlertTriangle, Layers3, Radio, RefreshCw, Route, TriangleAlert } from 'lucide-react';
+import { Activity, AlertTriangle, Layers3, RefreshCw, Route, TriangleAlert } from 'lucide-react';
 
-import { api, type AreaGraphRoute, type AreaNetworkData, type ClosureScenario, type Feature, type InfrastructurePlan, type OSMPlace } from '../api';
+import { api, type AreaGraphRoute, type AreaNetworkData, type ClosureScenario, type Feature, type OSMPlace } from '../api';
 
 
 
@@ -59,14 +59,6 @@ export default function RoadNetworkExplorer({ onNetworkLoaded, onSimulationCalcu
 
   const [routeLoading, setRouteLoading] = useState(false);
 
-  const [sensorSites, setSensorSites] = useState<string[]>([]);
-
-  const [installCostPerKm, setInstallCostPerKm] = useState(250000);
-
-  const [infrastructurePlan, setInfrastructurePlan] = useState<InfrastructurePlan | null>(null);
-
-  const [planLoading, setPlanLoading] = useState(false);
-
   const [placeQuery, setPlaceQuery] = useState('');
 
   const [places, setPlaces] = useState<OSMPlace[]>([]);
@@ -89,9 +81,9 @@ export default function RoadNetworkExplorer({ onNetworkLoaded, onSimulationCalcu
 
       const data = await api.networkArea(bbox, refresh);
 
-      setNetwork(data); onNetworkLoaded?.(data, selectedPlace?.displayName ?? `Map area ${data.bbox.map((value) => value.toFixed(4)).join(', ')}`); setClosedRoads([]); setBaseline(null); setModified(null);
+      setNetwork(data); onNetworkLoaded?.(data, selectedPlace?.displayName ?? `Map area ${data.bbox.map((value) => value.toFixed(4)).join(', ')}`); setClosedRoads([]); setBaseline(null); setModified(null); setRouteComparisons(null);
 
-      setStart(data.junctions[0]?.id ?? ''); setDestination(data.junctions[1]?.id ?? ''); setSensorSites([]); setInfrastructurePlan(null);
+      setStart(data.junctions[0]?.id ?? ''); setDestination(data.junctions[1]?.id ?? '');
 
       const latest = await api.latestClosureScenario().catch(() => ({ scenario: null }));
 
@@ -133,20 +125,6 @@ export default function RoadNetworkExplorer({ onNetworkLoaded, onSimulationCalcu
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not recalculate this road network.'); }
 
     finally { setRouteLoading(false); }
-
-  };
-
-  const buildInfrastructurePlan = async () => {
-
-    if (!network || sensorSites.length < 2) return;
-
-    setPlanLoading(true); setError('');
-
-    try { setInfrastructurePlan(await api.planInfrastructure({ bbox: network.bbox, junctionIds: sensorSites, estimatedCostPerKm: installCostPerKm })); }
-
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not estimate the infrastructure connections.'); }
-
-    finally { setPlanLoading(false); }
 
   };
 
@@ -244,9 +222,14 @@ export default function RoadNetworkExplorer({ onNetworkLoaded, onSimulationCalcu
 
 
 
-  return <div className="network-explorer"><div className="module-title-row"><div><span className="eyebrow">OPENSTREETMAP ROAD NETWORK</span><h2>Explore and assess a road area</h2><p>Search any place, adjust the map, then load its mapped roads and assess route or closure impacts.</p></div>{network && <div className="network-report-actions"><button className="button" onClick={exportReportCsv}>Export CSV</button><button className="button" onClick={() => window.print()}>Print / save PDF</button></div>}</div>
+  return <div className="network-explorer"><div className="module-title-row"><div><span className="eyebrow">ROAD NETWORK ANALYSIS · INDIA</span><h2>Explore and test a road area</h2><p>Search for a place in India, view real OpenStreetMap roads, block a road, and see how the route changes.</p></div>{network && <div className="network-report-actions"><button className="button" onClick={exportReportCsv}>Export CSV</button><button className="button" onClick={() => window.print()}>Print / save PDF</button></div>}</div>
 
-    <form className="network-place-search" onSubmit={searchPlace}><input value={placeQuery} onChange={(event) => setPlaceQuery(event.target.value)} placeholder="Search a city, street, landmark or address" aria-label="Search map location"/><button className="button" disabled={placeLoading || !placeQuery.trim()}>{placeLoading ? 'Searching…' : 'Search places'}</button><button type="button" className="button button-primary" onClick={() => loadArea()} disabled={!bbox || areaTooLarge || loading}><Layers3 size={14} />{loading ? 'Loading roads…' : areaTooLarge ? 'Zoom in to load area' : 'Load visible area'}</button></form>{places.length > 0 && <div className="network-place-results">{places.map((place) => <button key={place.placeId} onClick={() => { setSelectedPlace(place); setPlaces([]); }} type="button">{place.displayName}</button>)}</div>}
+    <form className="network-place-search" onSubmit={searchPlace}><input value={placeQuery} onChange={(event) => setPlaceQuery(event.target.value)} placeholder="Search an Indian city, road or landmark" aria-label="Search map location in India"/><button className="button" disabled={placeLoading || !placeQuery.trim()}>{placeLoading ? 'Searching India…' : 'Search places'}</button><button type="button" className="button button-primary" onClick={() => loadArea()} disabled={!bbox || areaTooLarge || loading}><Layers3 size={14} />{loading ? 'Loading roads…' : areaTooLarge ? 'Zoom in to load area' : 'Load visible area'}</button></form>{places.length > 0 && <div className="network-place-results">{places.map((place) => <button key={place.placeId} onClick={() => {
+      const radius = 0.045;
+      setSelectedPlace(place);
+      setBbox([place.latitude - radius, place.longitude - radius, place.latitude + radius, place.longitude + radius]);
+      setPlaces([]);
+    }} type="button">{place.displayName}</button>)}</div>}
 
     {network?.metrics && <div className="metric-grid network-metrics">{[
 
@@ -256,17 +239,26 @@ export default function RoadNetworkExplorer({ onNetworkLoaded, onSimulationCalcu
 
       ['Road length', `${(network.metrics.totalRoadDistanceMeters / 1000).toFixed(1)} km`],
 
-      ['Connected areas', String(network.metrics.connectedAreas)],
+      ['Network status', network.metrics.connectedAreas === 1 ? 'Connected' : `${network.metrics.connectedAreas} separate areas`],
 
-      ['Critical junctions', String(network.metrics.criticalJunctions)],
+      ['Important junctions', String(network.metrics.criticalJunctions)],
 
-      ['Critical road links', String(network.metrics.criticalRoadSegments ?? 0)],
+      ['Bridge road links', String(network.metrics.criticalRoadSegments ?? 0)],
 
     ].map(([label, value]) => <article className="metric-card" key={label}><div className="metric-icon blue"><Activity size={16} /></div><div><span>{label}</span><b>{value}</b><small>From selected OSM extract</small></div></article>)}</div>}
 
-    <div className="network-explorer-grid"><section className="surface network-map-panel"><div className="network-map-title"><div><b>{network ? 'Selected road network' : 'Select an area on the map'}</b><small>{network?.sourceLabel ?? 'Search for a place or pan and zoom. Load a small map area to analyze its actual OSM roads.'}</small></div>{network && <button className="button button-quiet" onClick={() => loadArea(true)} disabled={loading || areaTooLarge}><RefreshCw size={13} /> Refresh extract</button>}</div><MapContainer center={[20, 0]} zoom={2} scrollWheelZoom className="network-leaflet-map"><SearchMapController place={selectedPlace} /><TileLayer attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap contributors</a>" url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" /><VisibleBounds onBounds={boundsChanged} />{network && <><GeoJSON key={`${network.bbox.join(',')}:${closedRoads.join(',')}`} data={network.features as never} style={roadStyle as never} onEachFeature={onEachRoad as never} />{network.junctions.map((junction) => <Marker key={junction.id} position={[junction.latitude, junction.longitude]}><Popup><b>{junction.name}</b><br />{junction.roadCount} road connections<br />{critical.has(junction.id) ? 'Vulnerable junction: this point connects separate parts of this extract.' : 'Mapped intersection'}</Popup></Marker>)}{activeRoute.length > 1 && <Polyline positions={activeRoute} pathOptions={{ color: '#18b88a', weight: 6 }} />}{infrastructurePlan?.connections.flatMap((connection) => connection.segments).map((segment, index) => <Polyline key={`sensor-link-${index}`} positions={segment.coordinates.map(([lon, lat]) => [lat, lon] as [number, number])} pathOptions={{ color: '#a75be8', weight: 5, dashArray: '8 5' }} />)}</>}</MapContainer><div className="network-map-legend"><span><i className="road-open" />Mapped road</span><span><i className="road-closed" />Simulated closure</span><span><i className="road-route" />Recalculated route</span><span><i className="critical-junction" />Articulation point</span><span><i className="critical-road" />Bridge road link</span></div></section>
+    <div className="network-explorer-grid"><section className="surface network-map-panel"><div className="network-map-title"><div><b>{network ? 'Selected road network' : 'Select an area in India'}</b><small>{network?.sourceLabel ?? 'Search for an Indian place or pan and zoom within India.'}</small></div>{network && <button className="button button-quiet" onClick={() => loadArea(true)} disabled={loading || areaTooLarge}><RefreshCw size={13} /> Refresh extract</button>}</div><MapContainer center={[22.5, 78.5]} zoom={5} scrollWheelZoom className="network-leaflet-map"><SearchMapController place={selectedPlace} /><TileLayer attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap contributors</a>" url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" /><VisibleBounds onBounds={boundsChanged} />{network && <><GeoJSON key={`${network.bbox.join(',')}:${closedRoads.join(',')}`} data={network.features as never} style={roadStyle as never} onEachFeature={onEachRoad as never} />{network.junctions.map((junction) => <Marker key={junction.id} position={[junction.latitude, junction.longitude]}><Popup><b>{junction.name}</b><br />{junction.roadCount} road connections<br />{critical.has(junction.id) ? 'Important junction: removing it can split this area.' : 'Mapped intersection'}</Popup></Marker>)}{activeRoute.length > 1 && <Polyline positions={activeRoute} pathOptions={{ color: '#18b88a', weight: 6 }} />}</>}</MapContainer><div className="network-map-legend"><span><i className="road-open" />Mapped road</span><span><i className="road-closed" />Blocked road</span><span><i className="road-route" />New route</span><span><i className="critical-junction" />Important junction</span><span><i className="critical-road" />Bridge road</span></div></section>
 
-    <aside className="surface network-tools"><div className="network-tool-section"><span className="panel-overline">AREA COVERAGE</span><h3>Visible map bounds</h3><p>{bbox ? `${bbox[0].toFixed(4)}, ${bbox[1].toFixed(4)} to ${bbox[2].toFixed(4)}, ${bbox[3].toFixed(4)}` : 'Move the map to choose an area.'}</p><small>{areaTooLarge ? 'Zoom in: each map span must be 0.12 degrees or less before loading roads.' : 'Overpass requests are capped at 0.12 degrees per side and cached locally to limit repeat downloads.'}</small></div>{network && <><div className="network-tool-section"><span className="panel-overline">DISRUPTION SCENARIO</span><h3>Temporary road closures</h3><p>Click a road on the map to close or reopen it for this scenario.</p><div className="closure-status"><TriangleAlert size={14} />{closedRoads.length ? `${closedRoads.length} road${closedRoads.length === 1 ? '' : 's'} closed in simulation` : 'No simulated closures'}</div><button className="button button-quiet button-wide" onClick={() => setClosedRoads([])} disabled={!closedRoads.length}>Reopen all roads</button><button className="button button-quiet button-wide" onClick={() => void saveScenario()} disabled={!network}>Save closure scenario</button>{savedScenario && savedScenario.bbox.every((value, index) => Math.abs(value - network.bbox[index]) < 0.00001) && <button className="button button-quiet button-wide" onClick={() => { setClosedRoads(savedScenario.closedRoadIds); setStart(savedScenario.start); setDestination(savedScenario.destination); }}>Restore saved scenario</button>}</div><div className="network-tool-section"><span className="panel-overline">NETWORK RESILIENCE</span><h3>Check a connection</h3><label className="form-field"><span>From intersection</span><select value={start} onChange={(event) => setStart(event.target.value)}>{network.junctions.map((junction) => <option key={junction.id} value={junction.id}>{junction.name}</option>)}</select></label><label className="form-field"><span>To intersection</span><select value={destination} onChange={(event) => setDestination(event.target.value)}>{network.junctions.map((junction) => <option key={junction.id} value={junction.id}>{junction.name}</option>)}</select></label><button className="button button-primary button-wide" onClick={recalculate} disabled={routeLoading || !start || !destination || start === destination}><Route size={14} />{routeLoading ? 'Recalculating…' : 'Compare route impact'}</button>{routeComparisons && <div className="route-comparison-cards">{[{ label: 'Shortest distance', value: routeComparisons.shortest }, { label: 'Estimated fastest', value: routeComparisons.fastest }].map(({ label, value }) => <article key={label}><b>{label}</b>{value.after.reachable ? <span>Before: {(value.before.distanceMeters / 1000).toFixed(2)} km · ~{value.before.estimatedDurationMinutes ?? '—'} min<br/>Scenario: {(value.after.distanceMeters / 1000).toFixed(2)} km · ~{value.after.estimatedDurationMinutes ?? '—'} min</span> : <span>Disconnected after simulated closures</span>}<small>Estimated duration uses road-class speeds, not live traffic.</small></article>)}</div>}</div><div className="network-tool-section"><span className="panel-overline">INFRASTRUCTURE PLANNING</span><h3>Connect monitoring sites</h3><p>Select mapped intersections. Purple links show a low-distance connected installation plan.</p><label className="form-field"><span>Estimated installation cost per road km (INR)</span><input type="number" min="0" step="10000" value={installCostPerKm} onChange={(event) => setInstallCostPerKm(Number(event.target.value))} /></label><div className="network-junction-options">{network.junctions.slice(0, 40).map((junction) => <label key={junction.id}><input type="checkbox" checked={sensorSites.includes(junction.id)} onChange={() => { setSensorSites((current) => current.includes(junction.id) ? current.filter((id) => id !== junction.id) : [...current, junction.id]); setInfrastructurePlan(null); }} /><span>{junction.name}</span></label>)}</div><small>Showing up to 40 intersections in the loaded area. Costs are estimates you enter; no supplier quote data is available.</small><button className="button button-primary button-wide" onClick={buildInfrastructurePlan} disabled={planLoading || sensorSites.length < 2}><Radio size={14} />{planLoading ? 'Estimating connections…' : 'Build connection plan'}</button>{infrastructurePlan && <div className="network-route-impact"><b>{infrastructurePlan.connected ? `${infrastructurePlan.connections.length} connections · ${(infrastructurePlan.totalDistanceMeters / 1000).toFixed(2)} km` : 'Selected sites span disconnected road areas'}</b><span>Estimated installation: ₹{infrastructurePlan.estimatedInstallationCost.toLocaleString('en-IN')}</span><small>{infrastructurePlan.costBasis}</small></div>}</div><div className="network-tool-section network-critical-note"><span className="panel-overline">CRITICAL NETWORK ELEMENTS</span><p><AlertTriangle size={14} />{network.metrics.criticalJunctions || (network.metrics.criticalRoadSegments ?? 0) ? `${network.metrics.criticalJunctions} articulation points and ${network.metrics.criticalRoadSegments ?? 0} bridge road segments were found. Removing these can split the mapped network.` : 'No articulation points or bridge road segments were identified in this extract.'}</p></div></>}{error && <div className="osm-route-error" role="alert">{error}</div>}</aside></div><footer className="osm-route-footer">OSM road geometry is not live traffic. Closure results use the downloaded road graph and shortest road distance; OSRM route estimates remain a separate service.</footer></div>;
+    <aside className="surface network-tools">
+      <div className="network-tool-section"><span className="panel-overline">AREA COVERAGE</span><h3>Visible map area</h3><p>{bbox ? `${bbox[0].toFixed(4)}, ${bbox[1].toFixed(4)} to ${bbox[2].toFixed(4)}, ${bbox[3].toFixed(4)}` : 'Move the map to choose an area.'}</p><small>{areaTooLarge ? 'Zoom in: each map span must be 0.12 degrees or less before loading roads.' : 'Choose a small area for a faster and clearer road extract.'}</small></div>
+      {network && <>
+        <div className="network-tool-section"><span className="panel-overline">ROAD CLOSURES</span><h3>Test a blocked road</h3><p>Click a road on the map to block or reopen it.</p><div className="closure-status"><TriangleAlert size={14} />{closedRoads.length ? `${closedRoads.length} road${closedRoads.length === 1 ? '' : 's'} blocked` : 'No roads blocked'}</div><button className="button button-quiet button-wide" onClick={() => { setClosedRoads([]); setModified(null); setRouteComparisons(null); }} disabled={!closedRoads.length}>Reopen all roads</button><button className="button button-quiet button-wide" onClick={() => void saveScenario()} disabled={!network}>Save scenario</button>{savedScenario && savedScenario.bbox.every((value, index) => Math.abs(value - network.bbox[index]) < 0.00001) && <button className="button button-quiet button-wide" onClick={() => { setClosedRoads(savedScenario.closedRoadIds); setStart(savedScenario.start); setDestination(savedScenario.destination); }}>Restore saved scenario</button>}</div>
+        <div className="network-tool-section"><span className="panel-overline">ROUTE TEST</span><h3>Compare before and after</h3><label className="form-field"><span>Start junction</span><select value={start} onChange={(event) => setStart(event.target.value)}>{network.junctions.map((junction) => <option key={junction.id} value={junction.id}>{junction.name}</option>)}</select></label><label className="form-field"><span>Destination junction</span><select value={destination} onChange={(event) => setDestination(event.target.value)}>{network.junctions.map((junction) => <option key={junction.id} value={junction.id}>{junction.name}</option>)}</select></label><button className="button button-primary button-wide" onClick={recalculate} disabled={routeLoading || !start || !destination || start === destination}><Route size={14} />{routeLoading ? 'Checking route…' : 'Compare route'}</button>{routeComparisons && <><div className={routeComparisons.shortest.after.reachable ? 'network-impact-summary' : 'network-impact-summary is-disconnected'}>{routeComparisons.shortest.after.reachable ? `The selected route still works, but closed roads can change its distance or speed.` : `These two junctions are unreachable from each other after the blocked roads.`}</div><div className="route-comparison-cards">{[{ label: 'Shortest distance', value: routeComparisons.shortest }, { label: 'Estimated fastest', value: routeComparisons.fastest }].map(({ label, value }) => <article key={label}><b>{label}</b>{!value.before.reachable ? <span>Before: no route is available.</span> : value.after.reachable ? <span>Before: {(value.before.distanceMeters / 1000).toFixed(2)} km · ~{value.before.estimatedDurationMinutes ?? '—'} min<br/>After: {(value.after.distanceMeters / 1000).toFixed(2)} km · ~{value.after.estimatedDurationMinutes ?? '—'} min</span> : <span>Before, a route was available. After the closure, the route is disconnected.</span>}<small>Estimated time uses road type speeds, not live traffic.</small></article>)}</div></>}</div>
+        <div className="network-tool-section network-critical-note"><span className="panel-overline">IMPORTANT JUNCTIONS</span><p><AlertTriangle size={14} />{network.metrics.criticalJunctions || (network.metrics.criticalRoadSegments ?? 0) ? `${network.metrics.criticalJunctions} junction(s) and ${network.metrics.criticalRoadSegments ?? 0} road link(s) could split this network if removed.` : 'No important junction or bridge road was found in this area.'}</p></div>
+      </>}
+      {error && <div className="osm-route-error" role="alert">{error}</div>}
+    </aside>
+  </div><footer className="osm-route-footer">This page uses downloaded OpenStreetMap roads. Closure results are simulations, and route times are estimates—not live traffic.</footer></div>;
 
 }
 
