@@ -54,10 +54,12 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.BasicAuthentication',
     ],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
+    'DEFAULT_THROTTLE_RATES': {'anon': '30/hour'},
 }
 ALLOW_DEMO_WRITES = os.getenv('ALLOW_DEMO_WRITES', 'true').lower() == 'true' and DEBUG
 OVERPASS_URL = os.getenv('OVERPASS_URL', 'https://overpass-api.de/api/interpreter')
 OSM_AUTO_FETCH = os.getenv('OSM_AUTO_FETCH', 'true').lower() == 'true'
-GOOGLE_ROUTES_API_KEY = os.getenv('GOOGLE_ROUTES_API_KEY', '')
+NOMINATIM_USER_AGENT = os.getenv('NOMINATIM_USER_AGENT', 'SmartFlowRoadNetworkPlatform/1.0 (OpenStreetMap-based route planning)')
+OSRM_BASE_URL = os.getenv('OSRM_BASE_URL', 'https://router.project-osrm.org')
 TOMTOM_API_KEY = os.getenv('TOMTOM_API_KEY', '')
 TRAFFIC_PROVIDER = os.getenv('TRAFFIC_PROVIDER', 'simulation')

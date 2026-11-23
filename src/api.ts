@@ -15,7 +15,14 @@ export type SensorSite = { id: number; code: string; name: string; latitude: num
 export type SensorConnection = { id: number; a: string; b: string; distance_m: number; install_cost: string; maintenance_cost_year: string; connected: boolean };
 export type SensorResult = { algorithm: string; edges: { id: string; a: string; b: string; distanceM: number; installCost: number; maintenanceCostYear: number }[]; trace: { edgeId: string; accepted: boolean; reason: string }[]; totalInstallCost: number; maintenanceCostYear: number; siteCount: number; connectionCount: number; connected: boolean; alternativeConnectionCost: number; savings: number; redundantConnections: { id: string; a: string; b: string; distanceM: number; installCost: number }[]; dataSource?: string };
 export type AnalyticsData = { networkSource: string; trafficSource: string; lastUpdated: string; trendDisclaimer: string; summary: { junctionCount: number; roadCount: number; activeIncidents: number; blockedRoads: number; estimatedAtoGMinutes: number | null; sensorConnectionsCost: number }; roads: TrafficRoad[]; congestionTrend: { hour: string; congestionIndex: number }[] };
-export type HealthData = { status: string; dataSource: string; isLiveTraffic: boolean; providers: { selectedProvider: string; googleRoutes: { configured: boolean; status: string }; tomtomTraffic: { configured: boolean; status: string }; simulation: { available: boolean; status: string } }; database: string; updatedAt: string };
+export type HealthData = { status: string; dataSource: string; isLiveTraffic: boolean; providers: { placeSearch: { service: string; status: string; policy: string }; routing: { service: string; status: string; endpoint: string }; traffic: { status: string; message: string } }; database: string; updatedAt: string };
+export type OSMPlace = { placeId: string; name: string; displayName: string; latitude: number; longitude: number; osmType: string; osmId: number; category: string; type: string };
+export type OSRMRoute = { id: number; distanceMeters: number; durationSeconds: number; retrievedAt: string; geometry: { type: 'LineString'; coordinates: [number, number][] }; legs: { summary: string; distanceMeters: number; durationSeconds: number; steps: { name: string; distanceMeters: number; durationSeconds: number; type: string; modifier: string }[] }[] };
+export type OSRMRouteResponse = { routes: OSRMRoute[]; source: string; retrievedAt: string };
+export type AreaJunction = { id: string; name: string; latitude: number; longitude: number; roadCount: number };
+export type AreaNetworkData = { source: string; sourceLabel: string; bbox: [number, number, number, number]; edges: Edge[]; nodes: Record<string, [number, number]>; features: { type: 'FeatureCollection'; features: Feature[] }; junctions: AreaJunction[]; metrics: { roadSegments: number; mappedRoads: number; junctions: number; totalRoadDistanceMeters: number; connectedAreas: number; criticalJunctions: number; criticalJunctionIds: string[] }; refreshError?: string };
+export type AreaGraphRoute = { reachable: boolean; segments: { roadId: string; name: string; coordinates: [number, number][]; distanceMeters: number }[]; distanceMeters: number; closedRoadIds: string[]; junctionPath?: string[]; message?: string };
+export type InfrastructurePlan = { connected: boolean; selectedJunctions: string[]; connections: { fromJunction: string; toJunction: string; distanceMeters: number; estimatedInstallationCost: number; segments: { roadId: string; name: string; coordinates: [number, number][]; distanceMeters: number }[] }[]; totalDistanceMeters: number; estimatedInstallationCost: number; costBasis: string };
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); this.name = 'ApiError'; }
@@ -30,7 +37,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthData>('/health/'),
   network: (refresh = false) => request<NetworkData>(`/network/${refresh ? '?refresh=1' : ''}`),
+  networkArea: (bbox: [number, number, number, number], refresh = false) => request<AreaNetworkData>(`/network/area/?south=${bbox[0]}&west=${bbox[1]}&north=${bbox[2]}&east=${bbox[3]}${refresh ? '&refresh=1' : ''}`),
+  routeArea: (payload: { bbox: [number, number, number, number]; start: string; destination: string; closedRoadIds: string[] }) => request<AreaGraphRoute>('/network/area/route/', { method: 'POST', body: JSON.stringify(payload) }),
+  planInfrastructure: (payload: { bbox: [number, number, number, number]; junctionIds: string[]; estimatedCostPerKm: number }) => request<InfrastructurePlan>('/infrastructure/plan/', { method: 'POST', body: JSON.stringify(payload) }),
   route: (payload: { start: string; destination: string; algorithm: 'dijkstra' | 'astar'; travelMode: string; preference: string; simulation?: { roadFactors: Record<string, number> } }) => request<RouteResult>('/routes/', { method: 'POST', body: JSON.stringify(payload) }),
+  searchPlaces: (query: string) => request<{ results: OSMPlace[]; source: string }>(`/places/search/?q=${encodeURIComponent(query)}`),
+  routeOSRM: (payload: { coordinates: { latitude: number; longitude: number }[]; alternatives?: boolean }) => request<OSRMRouteResponse>('/routes/osrm/', { method: 'POST', body: JSON.stringify(payload) }),
   incidents: () => request<Incident[]>('/incidents/'),
   createIncident: (payload: Partial<Incident>) => request<Incident>('/incidents/', { method: 'POST', body: JSON.stringify(payload) }),
   resolveIncident: (id: number) => request<Incident>(`/incidents/${id}/resolve/`, { method: 'POST', body: '{}' }),

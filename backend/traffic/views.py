@@ -4,9 +4,10 @@ import requests
 from django.conf import settings
 from django.db.models import Count, Sum
 from django.utils import timezone
-from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework import serializers, status, viewsets
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.response import Response
 
 from .models import Incident, RoadSegment, SensorConnection, SensorSite, SignalMeasurement, TrafficObservation
@@ -14,7 +15,36 @@ from .permissions import OperatorWritePermission
 from .serializers import IncidentSerializer, OptimizeSensorSerializer, SensorConnectionSerializer, SensorSiteSerializer, SignalInputSerializer, TrafficInputSerializer
 from .services.algorithms import find_route, sensor_mst
 from .services.network import CORRIDOR, get_network
-from .services.providers import google_traffic_route, provider_status, tomtom_flow
+from .services.providers import provider_status, tomtom_flow
+from .services.osm_services import GeoServiceError, get_osrm_route, search_nominatim
+from .services.area_network import AreaNetworkError, get_area_network, plan_infrastructure, route_in_area
+
+
+class OSRMRouteRequestSerializer(serializers.Serializer):
+    coordinates = serializers.ListField(child=serializers.DictField(), min_length=2, max_length=12)
+    alternatives = serializers.BooleanField(default=True)
+
+    def validate_coordinates(self, points):
+        for point in points:
+            latitude, longitude = point.get('latitude'), point.get('longitude')
+            if isinstance(latitude, bool) or isinstance(longitude, bool) or not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+                raise serializers.ValidationError('Every point needs numeric latitude and longitude values.')
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise serializers.ValidationError('Coordinates are outside valid geographic ranges.')
+        return points
+
+
+class AreaRouteRequestSerializer(serializers.Serializer):
+    bbox = serializers.ListField(child=serializers.FloatField(), min_length=4, max_length=4)
+    start = serializers.CharField(max_length=40)
+    destination = serializers.CharField(max_length=40)
+    closedRoadIds = serializers.ListField(child=serializers.CharField(max_length=80), required=False, max_length=100)
+
+
+class InfrastructurePlanSerializer(serializers.Serializer):
+    bbox = serializers.ListField(child=serializers.FloatField(), min_length=4, max_length=4)
+    junctionIds = serializers.ListField(child=serializers.CharField(max_length=40), min_length=2, max_length=30)
+    estimatedCostPerKm = serializers.FloatField(min_value=0, max_value=1000000000)
 
 def _latest_observations():
     result = {}
@@ -87,6 +117,47 @@ def network_view(request):
         'geojson': network['features'], 'edges': network['edges'], 'nodes': network.get('nodes', {}), 'traffic': traffic,
         'incidents': IncidentSerializer(incidents, many=True).data})
 
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle])
+def area_network_view(request):
+    try:
+        bbox = [request.query_params[name] for name in ('south', 'west', 'north', 'east')]
+        data = get_area_network(bbox, refresh=request.query_params.get('refresh') == '1')
+    except (KeyError, AreaNetworkError) as error:
+        code = status.HTTP_400_BAD_REQUEST if 'bounds' in str(error).lower() or 'area' in str(error).lower() or 'select a smaller' in str(error).lower() else status.HTTP_502_BAD_GATEWAY
+        return Response({'detail': str(error)}, status=code)
+    return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle])
+def area_route_view(request):
+    serializer = AreaRouteRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    try:
+        result = route_in_area(data['bbox'], data['start'], data['destination'], data.get('closedRoadIds', []))
+    except AreaNetworkError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle])
+def infrastructure_plan_view(request):
+    serializer = InfrastructurePlanSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    try:
+        result = plan_infrastructure(data['bbox'], data['junctionIds'], data['estimatedCostPerKm'])
+    except AreaNetworkError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def route_view(request):
@@ -133,11 +204,36 @@ def route_view(request):
     result['closedRoads'] = sorted(closures)
     result['networkSource'] = network['sourceLabel']
     result['updatedAt'] = timezone.now().isoformat()
-    if settings.TRAFFIC_PROVIDER == 'google_routes' and settings.GOOGLE_ROUTES_API_KEY:
-        try:
-            result['providerComparison'] = google_traffic_route(CORRIDOR[start], CORRIDOR[end], {'driving': 'DRIVE', 'cycling': 'BICYCLE', 'walking': 'WALK'}[mode])
-        except requests.RequestException:
-            result['providerWarning'] = 'Google Routes is configured but unavailable; using the local graph result.'
+    return Response(result)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle])
+def place_search_view(request):
+    query = request.query_params.get('q', '').strip()
+    if len(query) < 3:
+        return Response({'detail': 'Enter at least 3 characters to search OpenStreetMap.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(query) > 200:
+        return Response({'detail': 'Search query is too long.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        return Response({'results': search_nominatim(query), 'source': 'Nominatim · OpenStreetMap'})
+    except GeoServiceError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([AnonRateThrottle])
+def osrm_route_view(request):
+    serializer = OSRMRouteRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+        result = get_osrm_route(serializer.validated_data['coordinates'], serializer.validated_data['alternatives'])
+    except GeoServiceError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_502_BAD_GATEWAY)
+    from django.utils import timezone as django_timezone
+    result['retrievedAt'] = django_timezone.now().isoformat()
     return Response(result)
 
 class IncidentViewSet(viewsets.ModelViewSet):

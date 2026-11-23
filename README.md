@@ -1,22 +1,20 @@
-# SmartFlow Bengaluru
+# SmartFlow Road Network Optimization Platform
 
-SmartFlow is a full-stack graph theory prototype for exploring route optimization and sensor placement on an east Bengaluru corridor. It combines a React/Leaflet operations dashboard with a Django REST API. It is designed for a class demonstration and planning exploration, not live traffic control.
+SmartFlow is a practical road-network operations prototype built on OpenStreetMap. It combines a Leaflet map, user-submitted Nominatim place searches, OSRM driving estimates, cached Overpass extracts, temporary road-closure scenarios, and sensor-connectivity planning. It does not claim to provide live traffic conditions.
 
-## What works
+## Current capabilities
 
-- Leaflet map with OpenStreetMap tiles, road attribution, corridor junctions, road-condition colors, incidents, closures and route overlays.
-- Dijkstra and A* route calculation with fastest-time or shortest-distance preference, driving/cycling/walking assumptions, closure avoidance, alternative route and algorithm trace.
-- OSM road network loader using Overpass, persistent local extract cache and a visibly labeled corridor-model fallback when Overpass is unavailable.
-- Incident reporting/resolution, manual or simulated speed scenarios, advisory signal queue analysis, sensor-network planning with Prim/Kruskal, analytics and JSON report export.
-- Django data models, REST endpoints, SQLite for quick local setup, PostgreSQL support, optional Google Routes/TomTom provider adapters, and API permission checks.
+- Search for arbitrary mapped places, select a start and destination, use an optional device location, and view OSRM route alternatives on an OpenStreetMap map.
+- Explore a selected map area and load its actual OSM roads from Overpass. Extracts are bounded and cached locally.
+- Click roads to simulate closures, then compare shortest-distance connectivity before and after closures on the downloaded road graph. Critical junctions and disconnected areas are summarized in plain language.
+- Plan candidate monitoring connections and view estimated installation costs. Estimates are explicitly labeled.
+- Manage incident reports, view network analytics, and export an operations JSON report.
 
-## Quick start
+## Local setup
 
-Requirements: Node.js 20+, Python 3.10+, and pip. You can run the API with SQLite; PostgreSQL is optional.
+Requirements: Node.js 20+, Python 3.10+, and pip.
 
-### 1. Backend
-
-In PowerShell:
+### Backend
 
 ```powershell
 cd backend
@@ -29,29 +27,36 @@ python manage.py seed_demo
 python manage.py runserver
 ```
 
-The API is at `http://127.0.0.1:8000/api/`. To create an administrator account, run `python manage.py createsuperuser` and visit `/admin/`. For PostgreSQL, start the root `docker-compose.yml` with `docker compose up -d db`, then set `DATABASE_URL=postgresql://smartflow:smartflow-local@127.0.0.1:5432/smartflow` in `backend/.env` before running migrations.
+The API runs at `http://127.0.0.1:8000/api/`. SQLite is the local default. Set `DATABASE_URL` for PostgreSQL. `OSRM_BASE_URL` can point at a self-hosted OSRM instance; the default public OSRM demo endpoint has no production SLA.
 
-### 2. Frontend
+### Frontend
 
-Open a second PowerShell terminal at the project root:
+In a second terminal at the project root:
 
 ```powershell
-npm install
+Copy-Item .env.example .env
+npm ci
 npm run dev
 ```
 
-Vite prints the local dashboard URL. Set `VITE_API_BASE_URL` in a root `.env` file if the API is hosted somewhere other than `http://127.0.0.1:8000/api`.
+Set `VITE_API_BASE_URL` to the Django API URL if it differs from the local default. Vercel can use `npm ci`, `npm run build`, and `dist` as the output directory. Deploy Django separately and configure its CORS origins for the frontend domain.
 
-## Data and real-world limitations
+## Public service limits and data accuracy
 
-- The basemap uses the standard OpenStreetMap tile service and visibly attributes OpenStreetMap contributors. OSM road geometry is requested separately from Overpass. If that request fails, SmartFlow shows its corridor simulation graph and labels it as a model; it does not describe the fallback as OSM data.
-- Traffic is simulated by default. Source and observation time are shown in the dashboard and API. No live traffic feed or API key is included.
-- Google Routes and TomTom adapters are optional and require valid server-side keys and provider terms/quotas. Never put provider keys in frontend code.
-- Sensor install and maintenance costs, signal recommendations, and walking/cycling speeds are illustrative estimates. Signal analysis is advisory and has no controller integration.
-- The demo role selector only changes the presentation. Django protects writes outside the local demo configuration. Set `DJANGO_DEBUG=false` and `ALLOW_DEMO_WRITES=false` before deployment, configure a secure secret/hosts/CORS policy, and use authenticated operator accounts.
-- Before real deployment, validate OSM/provider licensing and coverage, map-match each corridor road to stable IDs, calibrate speeds and costs with field data, add authentication/audit policy, monitoring, and traffic authority review.
+- Nominatim search is submitted explicitly; the application does not send autocomplete requests. The backend caches searches and spaces uncached public Nominatim requests to at least one second apart. For a busy production service, use a contracted or self-hosted geocoder.
+- OSRM durations are routing estimates from the configured road profile, not traffic-aware durations. The UI states this alongside the result. The public OSRM demo service is intended for demonstration; use a managed or self-hosted deployment for operational use.
+- Overpass area extracts are capped at 0.12 degrees per side and cached under `backend/data/areas`. OSM road geometry does not include live speeds or incident reports.
+- A simulated road closure affects only the extracted graph route calculation. It does not alter OSRM's hosted road graph or represent an official road closure.
+- Estimated sensor installation costs are planning inputs, not vendor quotations. Configure and review cost data before using it for a budget.
+- OpenStreetMap data is © OpenStreetMap contributors and available under the Open Database License. Preserve attribution and comply with the relevant service policies.
 
-See [backend/API.md](backend/API.md) for endpoint contracts and [backend/requirements.txt](backend/requirements.txt) for Python packages.
+## API endpoints
+
+- `GET /api/places/search/?q=...` — user-submitted place search via Nominatim.
+- `POST /api/routes/osrm/` — OSRM route and alternatives for supplied coordinates.
+- `GET /api/network/area/?south=...&west=...&north=...&east=...` — fetch or reuse a cached OSM road graph extract.
+- `POST /api/network/area/route/` — calculate a shortest-distance path on that extract with optional closed road IDs.
+- `POST /api/incidents/`, `GET /api/incidents/` — incident management.
 
 ## Checks
 
@@ -60,23 +65,4 @@ npm run build
 cd backend
 python manage.py check
 python manage.py test traffic
-```
-
-## Project layout
-
-```text
-src/
-  App.tsx                       Operations dashboard and interactions
-  api.ts                        Typed API client and local fallback model
-  components/TrafficMap.tsx     Leaflet map and network overlays
-  components/AnalyticsDashboard.tsx
-  algorithms/graph.ts           Original graph-theory learning utilities
-  data/network.ts               Junction labels and fallback graph
-  styles.css                    Dashboard styling
-backend/
-  config/                       Django settings and URL configuration
-  traffic/models.py             Road, observation, incident, sensor and signal data
-  traffic/services/             OSM provider and graph algorithms
-  traffic/views.py              REST endpoints
-  traffic/tests.py              Route and MST algorithm checks
 ```

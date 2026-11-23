@@ -4,28 +4,10 @@ from django.conf import settings
 
 def provider_status():
     return {
-        'selectedProvider': settings.TRAFFIC_PROVIDER,
-        'googleRoutes': {'configured': bool(settings.GOOGLE_ROUTES_API_KEY), 'status': 'configured' if settings.GOOGLE_ROUTES_API_KEY else 'not_configured'},
-        'tomtomTraffic': {'configured': bool(settings.TOMTOM_API_KEY), 'status': 'configured' if settings.TOMTOM_API_KEY else 'not_configured'},
-        'simulation': {'available': True, 'status': 'active' if settings.TRAFFIC_PROVIDER == 'simulation' else 'fallback'},
+        'placeSearch': {'service': 'Nominatim', 'status': 'available', 'policy': 'public service · rate-limited and cached'},
+        'routing': {'service': 'OSRM', 'status': 'configured' if settings.OSRM_BASE_URL else 'not_configured', 'endpoint': settings.OSRM_BASE_URL},
+        'traffic': {'status': 'unavailable', 'message': 'No live traffic feed is configured.'},
     }
-
-def google_traffic_route(origin, destination, travel_mode='DRIVE'):
-    if not settings.GOOGLE_ROUTES_API_KEY:
-        return None
-    response = requests.post('https://routes.googleapis.com/directions/v2:computeRoutes', json={
-        'origin': {'location': {'latLng': {'latitude': origin['lat'], 'longitude': origin['lon']}}},
-        'destination': {'location': {'latLng': {'latitude': destination['lat'], 'longitude': destination['lon']}}},
-        'travelMode': travel_mode,
-        'routingPreference': 'TRAFFIC_AWARE_OPTIMAL',
-    }, headers={'X-Goog-Api-Key': settings.GOOGLE_ROUTES_API_KEY,
-        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline'}, timeout=12)
-    response.raise_for_status()
-    route = (response.json().get('routes') or [None])[0]
-    if not route:
-        return None
-    return {'provider': 'google_routes', 'duration': route.get('duration'), 'distanceM': route.get('distanceMeters'),
-        'encodedPolyline': route.get('polyline', {}).get('encodedPolyline')}
 
 def tomtom_flow(point):
     if not settings.TOMTOM_API_KEY:

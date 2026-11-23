@@ -1,4 +1,9 @@
 node_modules/
+dist/
+.vercel/
+.env
+.env.*
+!.env.example
 backend/.venv/
 backend/__pycache__/
 backend/**/__pycache__/
