@@ -1,286 +1,303 @@
-﻿import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import {
-  Activity, ArrowRight, BarChart3,
-  BookOpen, Check, ChevronLeft, ChevronRight, CircleHelp, Compass,
-  GitBranch, Grid2X2, Info, Layers3, Map, Menu, MousePointer2, Network,
-  Pause, Play, RotateCcw, Route, ShieldCheck, Sparkles,
-  TreePine, TrafficCone, X, Zap, type LucideIcon,
+  Activity, AlertCircle, AlertTriangle, ArrowRight, BarChart3, BookOpen,
+  CheckCircle2, ChevronDown, Clock3, CloudDownload, Compass, Gauge,
+  Info, MapPinned, Menu, Network, Play, Radio,
+  RefreshCw, Route, Shield, Signal, Siren, SlidersHorizontal,
+  Sparkles, Timer, Users, X, Zap,
+  type LucideIcon,
 } from 'lucide-react';
-import NetworkGraph from './components/NetworkGraph';
-import { initialRoads, locationById, locations, nodeIds, pointDefaults, type NodeId, type Road } from './data/network';
-import { breadthFirstPath, dijkstra, kruskal, pathMinutes, prim, rootTree } from './algorithms/graph';
+import TrafficMap from './components/TrafficMap';
+import { api, ApiError, localFallbackNetwork, localRoute, type AnalyticsData, type HealthData, type Incident, type NetworkData, type RouteResult, type SensorConnection, type SensorResult, type SensorSite, type SignalInput, type SignalResult, type TrafficRoad } from './api';
+import { locations, nodeIds, type NodeId } from './data/network';
 
-const AnalyticsCharts = lazy(() => import('./components/AnalyticsCharts'));
+const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard'));
 
-type View = 'overview' | 'route' | 'trees' | 'closures' | 'rooted' | 'analytics' | 'learn';
-type Strategy = 'dijkstra' | 'bfs';
-type Point = { x: number; y: number };
-const navItems: { id: View; label: string; icon: LucideIcon }[] = [
-  { id: 'overview', label: 'Overview', icon: Grid2X2 },
-  { id: 'route', label: 'Route finder', icon: Route },
-  { id: 'trees', label: 'Spanning trees', icon: GitBranch },
-  { id: 'closures', label: 'Road closures', icon: TrafficCone },
-  { id: 'rooted', label: 'Rooted tree', icon: TreePine },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { id: 'learn', label: 'Graph theory guide', icon: BookOpen },
+type Page = 'overview' | 'routes' | 'incidents' | 'sensors' | 'signals' | 'analytics' | 'education';
+type Role = 'Administrator' | 'Traffic operator' | 'Viewer';
+const nav: { id: Page; title: string; icon: LucideIcon; group: string }[] = [
+  { id: 'overview', title: 'Control centre', icon: Activity, group: 'OPERATIONS' },
+  { id: 'routes', title: 'Route optimizer', icon: Route, group: 'OPERATIONS' },
+  { id: 'incidents', title: 'Incidents & closures', icon: Siren, group: 'OPERATIONS' },
+  { id: 'sensors', title: 'Sensor infrastructure', icon: Radio, group: 'NETWORK DESIGN' },
+  { id: 'signals', title: 'Signal analysis', icon: Signal, group: 'NETWORK DESIGN' },
+  { id: 'analytics', title: 'Traffic analytics', icon: BarChart3, group: 'INTELLIGENCE' },
+  { id: 'education', title: 'Algorithm lab', icon: BookOpen, group: 'INTELLIGENCE' },
 ];
-const slides = [
-  { title: 'Smart City Traffic Network Optimization', kicker: 'INTRODUCTION', body: 'A graph theory simulation for exploring how road networks can be represented, analyzed, and optimized. Every travel time shown is an assumed model value.', view: 'overview' as View },
-  { title: 'A weighted graph of seven junctions', kicker: 'ROAD NETWORK', body: 'Junctions are vertices. Two-way road connections are edges. Each edge weight is an assumed travel time in minutes.', view: 'overview' as View },
-  { title: 'Find the fastest route with Dijkstra', kicker: 'SHORTEST PATH', body: 'For Silk Board to Marathahalli, the computed path is A → C → B → D → E → F → G with a total of 17 minutes.', view: 'route' as View },
-  { title: 'Kruskal builds a minimum spanning tree', kicker: 'MINIMUM SPANNING TREE', body: 'Sort the edges by weight, then accept an edge only when it joins two different components. A cycle-forming edge is skipped.', view: 'trees' as View },
-  { title: 'Prim grows a tree from a start junction', kicker: 'MINIMUM SPANNING TREE', body: 'Starting at A, repeatedly choose the cheapest edge leaving the current tree. Both MST algorithms return a total weight of 17.', view: 'trees' as View },
-  { title: 'Simulate a road closure', kicker: 'RESILIENCE', body: 'Close B–D to remove that edge from the network. Dijkstra recalculates routes using only roads that remain open.', view: 'closures' as View },
-  { title: 'Root the tree at Ibbaluru', kicker: 'TREE STRUCTURE', body: 'With D as the root, the spanning tree has height 3. Every other junction is grouped by its number of tree edges from D.', view: 'rooted' as View },
-  { title: 'Shortest path and MST solve different problems', kicker: 'CONCLUSION', body: 'Dijkstra connects one origin to one destination as efficiently as possible. A minimum spanning tree connects every vertex with minimum total edge weight.', view: 'learn' as View },
-];
-const fmt = (n: number) => Number.isFinite(n) ? `${n} min` : 'No route';
-const routeLabel = (path: NodeId[]) => path.length ? path.join(' → ') : 'No open route';
+const initialSignal: SignalInput = { junction_code: 'D', junction_name: 'Ibbaluru', vehicle_count: 75, average_wait_seconds: 55, queue_length_m: 70, cycle_duration_seconds: 90 };
+const conditionColors: Record<string, string> = { normal: '#38c997', moderate: '#e9ce58', heavy: '#ef9f4a', severe: '#eb6571', closed: '#7d8999', simulated: '#58bbd4', unobserved: '#72819a' };
 
-export default function App() {
-  const [view, setView] = useState<View>('overview');
-  const [roads, setRoads] = useState<Road[]>(initialRoads.map((road) => ({ ...road })));
+function money(value: number | string) { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(value) || 0); }
+function timeLabel(value: number | null | undefined) { return value === null || value === undefined || !Number.isFinite(value) ? 'No route' : `${Math.round(value * 10) / 10} min`; }
+function numberLabel(value: number) { return new Intl.NumberFormat('en-IN').format(value); }
+function providerMinutes(value: string) { const seconds = Number.parseFloat(value); return Number.isFinite(seconds) ? seconds / 60 : null; }
+function timeSince(input?: string) { if (!input) return 'No observation'; const date = new Date(input); return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }); }
+function getJunction(network: NetworkData, code: string) { return network.junctions.find((item) => item.code === code) ?? network.junctions[0]; }
+
+function localSensors(network: NetworkData): { sites: SensorSite[]; connections: SensorConnection[] } {
+  const sites = network.junctions.map((item, index) => ({ id: index + 1, code: item.code, name: item.name, latitude: item.lat, longitude: item.lon, candidate: true, active: true, install_cost: '95000', maintenance_cost_year: '7200' }));
+  const connections: SensorConnection[] = [];
+  for (let a = 0; a < sites.length; a += 1) for (let b = a + 1; b < sites.length; b += 1) {
+    const left = sites[a]; const right = sites[b]; const dist = Math.hypot((left.latitude - right.latitude) * 111320, (left.longitude - right.longitude) * 111320 * Math.cos(left.latitude * Math.PI / 180));
+    connections.push({ id: connections.length + 1, a: left.code, b: right.code, distance_m: Math.round(dist), install_cost: String(Math.round(65000 + dist * 46)), maintenance_cost_year: String(Math.round((65000 + dist * 46) * .045)), connected: true });
+  }
+  return { sites, connections };
+}
+
+function localSensorOptimize(sites: SensorSite[], connections: SensorConnection[], algorithm: 'prim' | 'kruskal', redundant: boolean, multiplier: number): SensorResult {
+  const candidates = connections.filter((edge) => edge.connected && sites.some((site) => site.code === edge.a && site.candidate) && sites.some((site) => site.code === edge.b && site.candidate)).map((edge) => ({ id: String(edge.id), a: edge.a, b: edge.b, distanceM: edge.distance_m, installCost: Number(edge.install_cost) * multiplier, maintenanceCostYear: Number(edge.maintenance_cost_year) * multiplier })).sort((a, b) => a.installCost - b.installCost || a.id.localeCompare(b.id));
+  const codes = sites.filter((site) => site.candidate).map((site) => site.code); const chosen: typeof candidates = []; const trace: SensorResult['trace'] = [];
+  if (algorithm === 'prim' && codes.length) {
+    const reached = new Set([codes[0]]);
+    while (reached.size < codes.length) { const edge = candidates.find((item) => reached.has(item.a) !== reached.has(item.b)); if (!edge) break; chosen.push(edge); reached.add(reached.has(edge.a) ? edge.b : edge.a); trace.push({ edgeId: edge.id, accepted: true, reason: 'Cheapest edge from the current tree to a new site' }); }
+  } else {
+    const parent = new Map(codes.map((code) => [code, code])); const find = (node: string): string => { const p = parent.get(node)!; if (p !== node) parent.set(node, find(p)); return parent.get(node)!; };
+    for (const edge of candidates) { const a = find(edge.a); const b = find(edge.b); const accepted = a !== b; if (accepted) { parent.set(a, b); chosen.push(edge); } trace.push({ edgeId: edge.id, accepted, reason: accepted ? 'Connects two components' : 'Rejected because it creates a cycle' }); if (chosen.length === codes.length - 1) break; }
+  }
+  const cost = chosen.reduce((sum, edge) => sum + edge.installCost, 0); const allCost = candidates.reduce((sum, edge) => sum + edge.installCost, 0); const remaining = candidates.filter((edge) => !chosen.some((selected) => selected.id === edge.id));
+  return { algorithm, edges: chosen, trace, totalInstallCost: cost, maintenanceCostYear: chosen.reduce((sum, edge) => sum + edge.maintenanceCostYear, 0), siteCount: codes.length, connectionCount: chosen.length, connected: chosen.length === Math.max(0, codes.length - 1), alternativeConnectionCost: allCost, savings: allCost - cost, redundantConnections: redundant ? remaining.slice(0, Math.max(1, Math.floor(codes.length / 3))) : [], dataSource: 'Local model · estimated installation costs' };
+}
+
+function App() {
+  const [page, setPage] = useState<Page>('overview');
+  const [network, setNetwork] = useState<NetworkData>(() => localFallbackNetwork());
+  const [apiOnline, setApiOnline] = useState(false);
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const [loadingNetwork, setLoadingNetwork] = useState(true);
+  const [message, setMessage] = useState('');
+  const [role, setRole] = useState<Role>('Traffic operator');
+  const [mobileNav, setMobileNav] = useState(false);
   const [start, setStart] = useState<NodeId>('A');
   const [destination, setDestination] = useState<NodeId>('G');
-  const [strategy, setStrategy] = useState<Strategy>('dijkstra');
-  const [dStep, setDStep] = useState(0);
-  const [treeAlgorithm, setTreeAlgorithm] = useState<'kruskal' | 'prim'>('kruskal');
-  const [treeStart, setTreeStart] = useState<NodeId>('A');
-  const [treeStep, setTreeStep] = useState(0);
-  const [root, setRoot] = useState<NodeId>('D');
-  const [selectedNode, setSelectedNode] = useState<NodeId | undefined>();
-  const [positions, setPositions] = useState<Record<NodeId, Point>>(pointDefaults);
+  const [algorithm, setAlgorithm] = useState<'dijkstra' | 'astar'>('dijkstra');
+  const [preference, setPreference] = useState<'fastest' | 'shortest'>('fastest');
+  const [travelMode, setTravelMode] = useState('driving');
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [selectedRoad, setSelectedRoad] = useState<TrafficRoad | null>(null);
+  const [mapFilters, setMapFilters] = useState<string[]>([]);
+  const [incidentKind, setIncidentKind] = useState('accident');
+  const [incidentSeverity, setIncidentSeverity] = useState('medium');
+  const [incidentDescription, setIncidentDescription] = useState('');
+  const [incidentLocation, setIncidentLocation] = useState<NodeId>('D');
+  const [incidentRoadId, setIncidentRoadId] = useState('');
+  const [incidentSaving, setIncidentSaving] = useState(false);
+  const [simulationFactors, setSimulationFactors] = useState<Record<string, number>>({});
+  const [simulationSpeed, setSimulationSpeed] = useState(22);
+  const [sensorSites, setSensorSites] = useState<SensorSite[]>([]);
+  const [sensorConnections, setSensorConnections] = useState<SensorConnection[]>([]);
+  const [sensorAlgorithm, setSensorAlgorithm] = useState<'prim' | 'kruskal'>('kruskal');
+  const [sensorResult, setSensorResult] = useState<SensorResult | null>(null);
+  const [redundancy, setRedundancy] = useState(false);
+  const [costMultiplier, setCostMultiplier] = useState(1);
+  const [sensorStep, setSensorStep] = useState(0);
+  const [signalInput, setSignalInput] = useState<SignalInput>(initialSignal);
+  const [signalResult, setSignalResult] = useState<SignalResult | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [signalSaving, setSignalSaving] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [trafficSource, setTrafficSource] = useState('Simulation · modeled baseline');
   const [presentation, setPresentation] = useState(false);
-  const [slide, setSlide] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [mobileNav, setMobileNav] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [presentationSlide, setPresentationSlide] = useState(0);
 
-  const route = useMemo(() => strategy === 'dijkstra' ? dijkstra(roads, start, destination) : null, [roads, start, destination, strategy]);
-  const bfsPath = useMemo(() => breadthFirstPath(roads, start, destination), [roads, start, destination]);
-  const selectedPath = strategy === 'dijkstra' ? route!.path : bfsPath;
-  const baseline = useMemo(() => dijkstra(initialRoads, start, destination), [start, destination]);
-  const minimumTree = useMemo(() => kruskal(roads), [roads]);
-  const primTree = useMemo(() => prim(roads, treeStart), [roads, treeStart]);
-  const activeTree = treeAlgorithm === 'kruskal' ? minimumTree : primTree;
-  const visibleTreeEdges = treeAlgorithm === 'kruskal'
-    ? activeTree.steps.slice(0, treeStep).filter((step) => step.accepted).map((step) => step.edge)
-    : activeTree.edges.slice(0, treeStep);
-  const rooted = useMemo(() => rootTree(minimumTree.edges, root), [minimumTree.edges, root]);
-  const originalWeight = initialRoads.reduce((sum, road) => sum + road.minutes, 0);
-  const savings = minimumTree.complete ? ((1 - minimumTree.total / originalWeight) * 100) : null;
-  const dijkstraProgress = route?.steps[Math.min(dStep, Math.max(0, (route?.steps.length ?? 1) - 1))];
-  const activeView = presentation ? slides[slide].view : view;
+  const canOperate = role !== 'Viewer';
+  const currentPage = nav.find((item) => item.id === page)?.title ?? 'Control centre';
+  const dataUpdatedAt = network.updatedAt;
+  const activeIncidents = incidents.filter((incident) => incident.status === 'active');
+  const closures = activeIncidents.filter((incident) => incident.kind === 'closure' || (incident.kind === 'accident' && incident.severity === 'critical')).map((incident) => incident.road_id).filter(Boolean);
+  const blockedRoadCount = new Set([...closures, ...network.traffic.filter((road) => road.closed).map((road) => road.roadId)]).size;
+  const selectedFeature = selectedRoad ?? (network.traffic.length ? network.traffic.find((road) => road.roadId === routeResult?.segments[0]?.roadId) ?? null : null);
+  const routeSavings = routeResult?.timeSavedMinutes ?? 0;
+  const displayedPage = presentation ? (['overview', 'routes', 'sensors', 'incidents', 'sensors', 'incidents', 'sensors', 'education'] as Page[])[presentationSlide] : page;
 
-  useEffect(() => { setDStep(0); }, [start, destination, roads]);
-  useEffect(() => { setTreeStep(0); }, [treeAlgorithm, treeStart, roads]);
+  const announce = useCallback((text: string) => { setMessage(text); window.setTimeout(() => setMessage(''), 5000); }, []);
+  const loadNetwork = useCallback(async (refresh = false) => {
+    setLoadingNetwork(true);
+    try {
+      const data = await api.network(refresh);
+      setNetwork(data); setIncidents(data.incidents); setApiOnline(true);
+      if (data.traffic.length) setTrafficSource(data.traffic[0].source);
+      if (data.refreshError) announce(data.refreshError);
+      return data;
+    } catch {
+      setApiOnline(false);
+      setNetwork((previous) => previous.source === 'simulation_fallback' ? previous : localFallbackNetwork());
+      return null;
+    } finally { setLoadingNetwork(false); }
+  }, [announce]);
+
   useEffect(() => {
-    if (!playing) return;
-    const maxStep = treeAlgorithm === 'kruskal' ? activeTree.steps.length : activeTree.edges.length;
-    if (treeStep >= maxStep) { setPlaying(false); return; }
-    const timer = window.setTimeout(() => setTreeStep((step) => step + 1), 650);
-    return () => window.clearTimeout(timer);
-  }, [playing, treeStep, treeAlgorithm, activeTree.steps.length, activeTree.edges.length]);
+    let cancelled = false;
+    (async () => {
+      const [networkResult, healthResult, sensorResult, signalResponse, analyticsResponse, incidentsResponse] = await Promise.allSettled([
+        api.network(), api.health(), api.sensors(), api.signals(), api.analytics(), api.incidents(),
+      ]);
+      if (cancelled) return;
+      if (networkResult.status === 'fulfilled') { setNetwork(networkResult.value); setIncidents(networkResult.value.incidents); setApiOnline(true); }
+      if (healthResult.status === 'fulfilled') { setApiOnline(true); setHealth(healthResult.value); }
+      if (sensorResult.status === 'fulfilled') { setSensorSites(sensorResult.value.sites); setSensorConnections(sensorResult.value.connections); }
+      else { const data = localSensors(network); setSensorSites(data.sites); setSensorConnections(data.connections); }
+      if (signalResponse.status === 'fulfilled') { setSignalResult(signalResponse.value); setSignalInput(signalResponse.value.measurement); }
+      if (analyticsResponse.status === 'fulfilled') setAnalytics(analyticsResponse.value);
+      if (incidentsResponse.status === 'fulfilled') setIncidents(incidentsResponse.value);
+      if (healthResult.status === 'rejected' && networkResult.status === 'rejected') setApiOnline(false);
+      setLoadingNetwork(false);
+    })();
+    return () => { cancelled = true; };
+    // Boot once; the local fallback graph is intentionally stable for this load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
-    if (!presentation || !playing) return;
-    const timer = window.setTimeout(() => setSlide((current) => {
-      if (current >= slides.length - 1) { setPlaying(false); return current; }
-      return current + 1;
-    }), 4500);
-    return () => window.clearTimeout(timer);
-  }, [presentation, playing, slide]);
+    let cancelled = false;
+    setRouteLoading(true);
+    const payload = { start, destination, algorithm, travelMode, preference, simulation: { roadFactors: simulationFactors } };
+    api.route(payload).then((result) => { if (!cancelled) { setRouteResult(result); setApiOnline(true); } }).catch(() => {
+      if (!cancelled) setRouteResult(localRoute(network, start, destination, algorithm, preference, simulationFactors));
+    }).finally(() => { if (!cancelled) setRouteLoading(false); });
+    return () => { cancelled = true; };
+  }, [start, destination, algorithm, preference, travelMode, simulationFactors, network]);
 
-  function toggleRoad(road: Road) {
-    setRoads((current) => current.map((candidate) => candidate.id === road.id ? { ...candidate, open: !candidate.open } : candidate));
-    setNotice(`${road.a}–${road.b} ${road.open ? 'closed' : 'reopened'} · route calculations updated`);
-    window.setTimeout(() => setNotice(''), 3600);
-  }
-  function resetSimulation() {
-    setRoads(initialRoads.map((road) => ({ ...road })));
-    setPositions(pointDefaults); setSelectedNode(undefined); setNotice('Network reset to the original simulation data.');
-    window.setTimeout(() => setNotice(''), 3600);
-  }
-  function openPresentation() { setView('overview'); setSlide(0); setPresentation(true); setPlaying(false); }
-  function changeView(next: View) { setView(next); setMobileNav(false); setSelectedNode(undefined); }
-  function sectionTitle() { return navItems.find((item) => item.id === activeView)?.label ?? 'Overview'; }
+  useEffect(() => {
+    if (!apiOnline) return;
+    api.analytics().then(setAnalytics).catch(() => undefined);
+  }, [apiOnline, incidents, network]);
 
-  const routeCurrent = strategy === 'dijkstra' ? dijkstraProgress?.current : undefined;
-  const routeVisited = strategy === 'dijkstra' ? dijkstraProgress?.visited ?? [] : [];
-  const map = (options: { roadsOverride?: Road[]; route?: NodeId[]; tree?: Road[]; current?: NodeId | null; visited?: NodeId[]; root?: NodeId; levels?: Partial<Record<NodeId, number>>; closures?: boolean } = {}) => <NetworkGraph
-    roads={options.roadsOverride ?? roads} route={options.route} tree={options.tree} current={options.current} visited={options.visited}
-    root={options.root} rootedLevels={options.levels} onRoadClick={options.closures ? toggleRoad : undefined}
-    onNodeClick={setSelectedNode} selectedNode={selectedNode} positions={positions} onPositionsChange={setPositions} closuresMode={options.closures}
-  />;
+  useEffect(() => {
+    if (!sensorSites.length) return;
+    let cancelled = false;
+    api.optimizeSensors(sensorAlgorithm, redundancy, costMultiplier).then((result) => { if (!cancelled) setSensorResult(result); }).catch(() => {
+      if (!cancelled) setSensorResult(localSensorOptimize(sensorSites, sensorConnections, sensorAlgorithm, redundancy, costMultiplier));
+    });
+    return () => { cancelled = true; };
+  }, [sensorAlgorithm, redundancy, costMultiplier, sensorSites, sensorConnections]);
 
-  const locationSelect = (value: NodeId, onChange: (value: NodeId) => void, label: string) => <label className="field"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value as NodeId)}>{locations.map((location) => <option value={location.id} key={location.id}>{location.id} · {location.name}</option>)}</select></label>;
+  useEffect(() => { if (sensorResult) setSensorStep(0); }, [sensorAlgorithm, sensorResult?.trace.length]);
 
-  function statCard(label: string, value: string | number, helper: string, icon: LucideIcon, tone: string) {
-    const Icon = icon;
-    return <article className="stat-card" key={label}><div className={`stat-icon ${tone}`}><Icon size={18} /></div><div className="stat-copy"><span>{label}</span><strong>{value}</strong><small>{helper}</small></div></article>;
-  }
+  const routeRequest = useCallback(async () => {
+    setRouteLoading(true);
+    try { const result = await api.route({ start, destination, algorithm, travelMode, preference, simulation: { roadFactors: simulationFactors } }); setRouteResult(result); setApiOnline(true); }
+    catch { setRouteResult(localRoute(network, start, destination, algorithm, preference, simulationFactors)); }
+    finally { setRouteLoading(false); }
+  }, [start, destination, algorithm, travelMode, preference, simulationFactors, network]);
 
-  function nodeInfo() {
-    if (!selectedNode) return null;
-    const connected = roads.filter((road) => road.a === selectedNode || road.b === selectedNode);
-    const info = locationById[selectedNode];
-    return <div className="node-detail"><div><span className="node-detail-id">{selectedNode}</span><div><strong>{info.name}</strong><small>{info.area}</small></div></div><span className="node-detail-count">{connected.length} roads</span><button className="icon-button" onClick={() => setSelectedNode(undefined)} aria-label="Close junction details"><X size={15} /></button><div className="connected-roads">{connected.map((road) => <span key={road.id} className={!road.open ? 'closed-text' : ''}>{road.a === selectedNode ? road.b : road.a} · {road.open ? `${road.minutes} min` : 'closed'}</span>)}</div></div>;
-  }
+  const handleIncidentSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canOperate) return;
+    if ((incidentKind === 'closure' || (incidentKind === 'accident' && incidentSeverity === 'critical')) && !incidentRoadId) {
+      announce('Choose the affected road segment so the route planner can apply this closure.');
+      return;
+    }
+    const place = getJunction(network, incidentLocation);
+    const payload = { road_id: incidentRoadId, location_name: place?.name ?? 'Bengaluru corridor', latitude: place?.lat ?? 12.926, longitude: place?.lon ?? 77.67, kind: incidentKind, severity: incidentSeverity, description: incidentDescription.trim() || `${incidentKind.replace('_', ' ')} reported near ${place?.name ?? 'Bengaluru corridor'}` };
+    setIncidentSaving(true);
+    try { const created = await api.createIncident(payload); setIncidents((items) => [created, ...items]); setApiOnline(true); await loadNetwork(); announce('Incident reported and added to the operator queue.'); }
+    catch (error) { if (error instanceof ApiError && error.status === 403) announce(error.message); else { const created = { ...payload, id: Date.now(), status: 'active' as const, reported_at: new Date().toISOString() }; setIncidents((items) => [created, ...items]); setNetwork((current) => ({ ...current, incidents: [created, ...current.incidents] })); announce('Incident added to the local simulation. Start Django to persist operator reports.'); } }
+    finally { setIncidentSaving(false); setIncidentDescription(''); }
+  };
 
-  function mapPanel(options: { title?: string; subtitle?: string; route?: NodeId[]; tree?: Road[]; current?: NodeId | null; visited?: NodeId[]; root?: NodeId; levels?: Partial<Record<NodeId, number>>; closures?: boolean; large?: boolean }) {
-    return <section className={`panel map-panel ${options.large ? 'map-panel-large' : ''}`}>
-      <div className="panel-heading"><div><div className="panel-title-line"><h2>{options.title ?? 'Network map'}</h2><span className="live-badge"><i /> SIMULATION</span></div><p>{options.subtitle ?? 'Simplified road graph · Silk Board to Marathahalli'}</p></div><div className="map-help"><MousePointer2 size={14} /> Drag junctions to reposition <span>·</span> Select a node for details</div></div>
-      <div className="map-stage">{map({ route: options.route, tree: options.tree, current: options.current, visited: options.visited, root: options.root, levels: options.levels, closures: options.closures })}<div className="map-compass"><Compass size={18} /><span>N</span></div><div className="map-scale"><span /><small>Schematic · not to scale</small></div></div>
-      <div className="map-legend"><span><i className="legend-road" />Road</span><span><i className="legend-route" />Selected route</span><span><i className="legend-tree" />Spanning tree</span><span><i className="legend-closed" />Closed road</span></div>
-      {nodeInfo()}
-    </section>;
-  }
+  const resolveIncident = async (incident: Incident) => {
+    if (!canOperate) return;
+    try { const updated = await api.resolveIncident(incident.id); setIncidents((items) => items.map((item) => item.id === updated.id ? updated : item)); await loadNetwork(); }
+    catch (error) { if (error instanceof ApiError && error.status === 403) { announce(error.message); return; } setIncidents((items) => items.map((item) => item.id === incident.id ? { ...item, status: 'resolved', resolved_at: new Date().toISOString() } : item)); }
+    announce(`Incident ${incident.id} resolved. The affected road is available for route calculations again.`);
+  };
 
-  function routeCard(compact = false) {
-    const currentRoute = strategy === 'dijkstra' ? route!.path : bfsPath;
-    const currentTime = pathMinutes(roads, currentRoute);
-    const delta = Number.isFinite(currentTime) && Number.isFinite(baseline.distance) ? currentTime - baseline.distance : null;
-    return <div className={`route-summary ${compact ? 'route-summary-compact' : ''}`}>
-      <div className="route-summary-head"><div><span className="section-eyebrow">{strategy === 'dijkstra' ? 'FASTEST ROUTE · DIJKSTRA' : 'FEWEST ROAD SEGMENTS · BFS'}</span><h3>{fmt(currentTime)}</h3></div><div className="route-summary-badge"><Route size={17} /></div></div>
-      {currentRoute.length ? <><div className="route-sequence">{currentRoute.map((id, index) => <span key={`${id}-${index}`} className="route-stop"><b>{id}</b><small>{locationById[id].name}</small>{index < currentRoute.length - 1 && <i />}</span>)}</div><div className="route-summary-foot"><span>{currentRoute.length - 1} road segments</span><span>{Math.max(0, currentRoute.length - 2)} junctions passed</span>{delta !== null && <span className={delta > 0 ? 'delta-bad' : 'delta-good'}>{delta > 0 ? '+' : ''}{delta} min vs. open network</span>}</div></> : <div className="no-route"><Info size={16} /> No open route connects these junctions. Reopen a road or select another destination.</div>}
-    </div>;
-  }
+  const applySensorSites = async (nextSites: SensorSite[], nextConnections = sensorConnections) => {
+    setSensorSites(nextSites); setSensorConnections(nextConnections);
+    const activeCodes = nextSites.filter((item) => item.candidate).map((item) => item.code);
+    const disabled = nextConnections.filter((item) => !item.connected).map((item) => item.id);
+    try { const config = await api.configureSensors(activeCodes, disabled); setSensorSites(config.sites); setSensorConnections(config.connections); setApiOnline(true); }
+    catch (error) { if (error instanceof ApiError && error.status === 403) announce(error.message); }
+  };
 
-  function routeControls() {
-    return <div className="route-controls">
-      <div className="field-row">{locationSelect(start, (value) => { setStart(value); setDStep(0); }, 'Starting junction')}{locationSelect(destination, (value) => { setDestination(value); setDStep(0); }, 'Destination')}</div>
-      <label className="field"><span>Optimization objective</span><select value={strategy} onChange={(event) => { setStrategy(event.target.value as Strategy); setDStep(0); }}><option value="dijkstra">Fastest travel time · Dijkstra</option><option value="bfs">Fewest road segments · BFS</option></select></label>
-      <button className="button button-primary full-button" onClick={() => { setDStep(0); setNotice(`${strategy === 'dijkstra' ? 'Dijkstra' : 'Breadth-first search'} recalculated ${start} → ${destination}.`); window.setTimeout(() => setNotice(''), 3000); }}><Route size={16} /> Find best route <ArrowRight size={16} /></button>
-    </div>;
-  }
+  const submitSignal = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!canOperate) return;
+    setSignalSaving(true);
+    try { const result = await api.analyzeSignal(signalInput); setSignalResult(result); setApiOnline(true); announce('Signal queue analysis updated. This is advisory only.'); }
+    catch (error) {
+      if (error instanceof ApiError && error.status === 403) { announce(error.message); setSignalSaving(false); return; }
+      const score = Math.min(100, Math.round(signalInput.vehicle_count * .25 + signalInput.average_wait_seconds * .2 + signalInput.queue_length_m * .15 + signalInput.vehicle_count / Math.max(signalInput.cycle_duration_seconds, 1) * 20));
+      const cycle = Math.max(45, Math.min(150, Math.round(50 + score * .65)));
+      setSignalResult({ measurement: signalInput, congestionScore: score, level: score >= 80 ? 'critical' : score >= 60 ? 'high' : score >= 35 ? 'moderate' : 'normal', recommendedCycleSeconds: cycle, suggestedGreenSeconds: Math.max(20, Math.min(cycle - 15, Math.round(cycle * (.35 + score / 220)))), source: 'Local operator simulation', explanation: 'Educational timing estimate only. This prototype does not control any traffic signals.' });
+    }
+    setSignalSaving(false);
+  };
 
-  function dijkstraPanel() {
-    const steps = route?.steps ?? [];
-    const step = steps[Math.min(dStep, Math.max(steps.length - 1, 0))];
-    return <section className="panel algorithm-panel">
-      <div className="panel-heading compact-heading"><div><span className="section-eyebrow">ROUTE OPTIMIZATION</span><h2>Find your route</h2><p>Choose the trip endpoints and what matters most for this journey.</p></div><span className="algorithm-chip"><Zap size={14} /> {strategy === 'dijkstra' ? 'Dijkstra' : 'Breadth-first search'}</span></div>
-      {routeControls()}
-      {routeCard()}
-      {strategy === 'dijkstra' && <div className="execution-panel"><div className="execution-head"><div><span className="section-eyebrow">ALGORITHM TRACE</span><strong>Dijkstra execution</strong></div><span className="step-counter">{steps.length ? Math.min(dStep + 1, steps.length) : 0}<i>/</i>{steps.length || 0}</span></div>
-        <div className="execution-progress"><span style={{ width: `${steps.length ? Math.min(100, ((dStep + 1) / steps.length) * 100) : 0}%` }} /></div>
-        <div className="execution-current"><div className="execution-current-icon"><Activity size={17} /></div><p>{step ? <>Visit <b>{step.current} · {locationById[step.current].name}</b> — current distance {fmt(step.distances[step.current])}</> : 'No reachable junctions to process.'}</p></div>
-        <div className="distance-list">{nodeIds.map((id) => <div key={id} className={`${step?.current === id ? 'distance-current' : ''} ${step?.visited.includes(id) ? 'distance-visited' : ''}`}><span><i>{id}</i>{locationById[id].name}</span><b>{step && Number.isFinite(step.distances[id]) ? `${step.distances[id]}m` : id === start ? '0m' : '∞'}</b></div>)}</div>
-        <div className="execution-actions"><button className="button button-subtle" disabled={dStep <= 0} onClick={() => setDStep((value) => Math.max(0, value - 1))}><ChevronLeft size={16} /> Previous</button><span>Settled nodes: {step?.visited.length ?? 0} / 7</span><button className="button button-subtle" disabled={!steps.length || dStep >= steps.length - 1} onClick={() => setDStep((value) => Math.min(steps.length - 1, value + 1))}>Next step <ChevronRight size={16} /></button></div>
-      </div>}
-      {strategy === 'bfs' && <div className="info-callout"><Info size={16} /><span>BFS minimizes the number of road segments. The travel time shown is the total weight of that route; it may not be the fastest option.</span></div>}
-    </section>;
-  }
+  const exportReport = async () => {
+    setReportLoading(true);
+    try {
+      const report = await api.report();
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `smartflow-report-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url);
+      announce('Operations report exported as JSON.');
+    } catch { const report = { generatedAt: new Date().toISOString(), trafficSource, networkSource: network.sourceLabel, route: routeResult, incidents, analytics, sensorResult, note: 'Simulation/manual measurements only; this report contains no live traffic feed.' }; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })); link.download = `smartflow-simulation-report-${new Date().toISOString().slice(0, 10)}.json`; link.click(); announce('Local simulation report exported as JSON.'); }
+    finally { setReportLoading(false); }
+  };
 
-  function treePanel() {
-    const steps = activeTree.steps;
-    const shownCount = Math.min(treeStep, steps.length);
-    const accepted = treeAlgorithm === 'kruskal' ? steps.slice(0, shownCount).filter((step) => step.accepted) : steps.slice(0, shownCount);
-    const shownRoads = accepted.map((step) => 'edge' in step ? step.edge : step);
-    const sum = shownRoads.reduce((total, road) => total + road.minutes, 0);
-    const completed = shownRoads.length === nodeIds.length - 1;
-    return <section className="panel algorithm-panel">
-      <div className="panel-heading compact-heading"><div><span className="section-eyebrow">NETWORK BACKBONE</span><h2>Minimum spanning tree</h2><p>Connect all junctions with the lowest possible total edge weight.</p></div><span className="algorithm-chip"><Layers3 size={14} /> {minimumTree.complete ? 'Connected graph' : 'Disconnected graph'}</span></div>
-      <div className="segmented-control"><button className={treeAlgorithm === 'kruskal' ? 'selected' : ''} onClick={() => { setTreeAlgorithm('kruskal'); setTreeStep(0); setPlaying(false); }}>Kruskal <small>Union–Find</small></button><button className={treeAlgorithm === 'prim' ? 'selected' : ''} onClick={() => { setTreeAlgorithm('prim'); setTreeStep(0); setPlaying(false); }}>Prim <small>Grow from a start</small></button></div>
-      {treeAlgorithm === 'prim' && <div className="field-row single-field">{locationSelect(treeStart, setTreeStart, 'Grow the tree from')}</div>}
-      <div className="tree-stats"><div><span>TREE WEIGHT</span><b>{sum}</b><small>minutes</small></div><div><span>ROADS SELECTED</span><b>{shownRoads.length}<i>/ 6</i></b><small>required for a tree</small></div><div><span>NETWORK STATUS</span><b className={activeTree.complete ? 'text-green' : 'text-red'}>{activeTree.complete ? 'Connected' : 'Split'}</b><small>{activeTree.complete ? 'all 7 junctions' : `${new Set(shownRoads.flatMap((road) => [road.a, road.b])).size} reachable so far`}</small></div></div>
-      <div className="step-toolbar"><button className="button button-subtle" disabled={treeStep <= 0} onClick={() => setTreeStep((n) => Math.max(0, n - 1))}><ChevronLeft size={16} /> Back</button><div className="step-dots">{steps.map((step, index) => <i key={`${step.edge.id}-${index}`} className={index < treeStep ? step.accepted ? 'accepted' : 'rejected' : ''} title={`${step.edge.id}: ${step.reason}`} />)}</div><button className="button button-primary" disabled={completed || !steps.length} onClick={() => setTreeStep((n) => Math.min(steps.length, n + 1))}>Add next edge <ChevronRight size={16} /></button><button className="icon-button" onClick={() => setTreeStep(0)} title="Reset tree steps"><RotateCcw size={15} /></button></div>
-      <div className="tree-step-list">{steps.map((step, index) => <div key={`${step.edge.id}-${index}`} className={`tree-step ${index < treeStep ? step.accepted ? 'step-accepted' : 'step-rejected' : ''} ${index === treeStep - 1 ? 'step-active' : ''}`}><span className="tree-step-index">{String(index + 1).padStart(2, '0')}</span><span className="tree-edge-name">{step.edge.a}—{step.edge.b}<small>{locationById[step.edge.a].name} to {locationById[step.edge.b].name}</small></span><strong>{step.edge.minutes} min</strong><span className={`decision ${index < treeStep ? step.accepted ? 'decision-accept' : 'decision-reject' : ''}`}>{index < treeStep ? step.accepted ? <><Check size={13} /> Kept</> : 'Cycle' : 'Pending'}</span></div>)}</div>
-      <div className="info-callout"><Info size={16} /><span>{treeAlgorithm === 'kruskal' ? 'Kruskal sorts the open roads from lightest to heaviest and uses Union–Find to reject cycle-forming edges.' : `Prim starts at ${treeStart} and repeatedly adds the cheapest road that reaches a new junction.`} The minimum spanning tree is an infrastructure backbone, not a fastest trip route.</span></div>
-    </section>;
-  }
+  const refreshOsm = async () => { announce('Requesting a fresh OSM road extract from Overpass…'); const data = await loadNetwork(true); if (data?.source === 'openstreetmap') announce(`Loaded ${data.geojson.features.length.toLocaleString()} OpenStreetMap road features.`); else if (data) announce('OSM extract is unavailable. The explicitly labeled corridor model remains active.'); };
+  const useJunction = (code: string) => { if (nodeIds.includes(code as NodeId)) { if (page === 'incidents') setIncidentLocation(code as NodeId); else if (page === 'routes') setDestination(code as NodeId); else setStart(code as NodeId); announce(`${code} selected for ${page === 'incidents' ? 'incident location' : page === 'routes' ? 'destination' : 'route origin'}.`); } };
+  const toggleFilter = (value: string) => setMapFilters((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  const selectRoad = (road: TrafficRoad) => { setSelectedRoad(road); setIncidentRoadId(road.roadId); setSimulationSpeed(Math.round(road.speedKph ?? 22)); };
 
-  function closurePanel() {
-    const change = Number.isFinite(route!.distance) && Number.isFinite(baseline.distance) ? route!.distance - baseline.distance : null;
-    return <section className="panel closure-panel"><div className="panel-heading compact-heading"><div><span className="section-eyebrow">WHAT-IF SCENARIOS</span><h2>Road closure simulator</h2><p>Toggle a road to model a disruption. Routes and network algorithms recalculate automatically.</p></div><button className="button button-subtle" onClick={resetSimulation}><RotateCcw size={15} /> Reset simulation</button></div>
-      <div className="closure-impact"><div className="impact-symbol"><TrafficCone size={20} /></div><div><span>FASTEST A → G RIGHT NOW</span><strong>{fmt(dijkstra(roads, 'A', 'G').distance)}</strong><small>{change !== null ? `${change > 0 ? '+' : ''}${change} min from the all-open baseline` : 'The destination is unreachable'}</small></div><div className={`impact-state ${minimumTree.complete ? 'connected' : 'disconnected'}`}><i />{minimumTree.complete ? 'Network connected' : 'Network disconnected'}</div></div>
-      <div className="closure-layout"><div className="road-list">{roads.map((road) => <div key={road.id} className={`road-row ${road.open ? '' : 'road-row-closed'}`}><div className="road-route-icon"><span>{road.a}</span><i /><span>{road.b}</span></div><div className="road-row-name"><strong>{locationById[road.a].name} <span>↔</span> {locationById[road.b].name}</strong><small>{road.minutes} min · road {road.id}</small></div><button className={`toggle ${road.open ? 'toggle-on' : ''}`} role="switch" aria-checked={road.open} aria-label={`${road.open ? 'Close' : 'Open'} road ${road.id}`} onClick={() => toggleRoad(road)}><i /></button></div>)}</div><div className="closure-side"><div className="closure-route-card"><span className="section-eyebrow">CURRENT OPTIMAL ROUTE</span><strong>{fmt(dijkstra(roads, 'A', 'G').distance)}</strong><p>{routeLabel(dijkstra(roads, 'A', 'G').path)}</p><div className="mini-road-chain">{dijkstra(roads, 'A', 'G').path.slice(1).map((id, index) => <span key={`${id}-${index}`}>{dijkstra(roads, 'A', 'G').path[index]}—{id}</span>)}</div></div><div className="closure-tip"><Sparkles size={16} /><p><b>Try this test:</b> Close <b>B–D</b> (Agara to Ibbaluru). The fastest A-to-G route changes from 17 to 19 minutes.</p></div></div></div>
-    </section>;
-  }
+  const sourceLine = <span className={`source-status ${network.source === 'openstreetmap' ? 'source-live' : 'source-sim'}`}><i />{network.sourceLabel}</span>;
+  const header = <header className="command-header"><div className="command-title"><button className="mobile-nav-button icon-button" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={18} /></button><div><div className="crumb">SMARTFLOW <span>/</span> {currentPage.toUpperCase()}</div><h1>{page === 'overview' ? 'Traffic control centre' : currentPage}</h1></div></div><div className="header-controls"><div className="simulation-status"><span className="status-dot" /> {network.traffic.some((road) => !road.isSimulated) ? 'OBSERVED DATA' : 'SIMULATION MODE'}</div><label className="role-select"><Users size={13} /><select value={role} onChange={(event) => setRole(event.target.value as Role)} aria-label="Demo role display" title="Presentation control only. Django enforces permissions for API writes."><option>Administrator</option><option>Traffic operator</option><option>Viewer</option></select><ChevronDown size={12} /></label><button className="button button-export" disabled={reportLoading} onClick={exportReport}>{reportLoading ? <RefreshCw className="spin" size={14} /> : <CloudDownload size={14} />} Export report</button></div></header>;
 
-  function rootedPanel() {
-    const leaves = rooted.order.filter((id) => rooted.children[id].length === 0 && id !== root);
-    const levelGroups = Array.from({ length: rooted.height + 1 }, (_, level) => ({ level, nodes: rooted.order.filter((id) => rooted.levels[id] === level) }));
-    return <section className="panel rooted-panel"><div className="panel-heading compact-heading"><div><span className="section-eyebrow">TREE ORGANIZATION</span><h2>Rooted traffic hierarchy</h2><p>Choose any junction to orient the minimum spanning tree and calculate levels.</p></div>{locationSelect(root, setRoot, 'Root junction')}</div>
-      <div className="root-summary"><div className="root-symbol"><TreePine size={22} /></div><div><span>TREE HEIGHT</span><strong>{minimumTree.complete ? rooted.height : '—'}</strong></div><div className="root-summary-divider" /><div><span>ROOT</span><strong>{root} · {locationById[root].name}</strong></div><div className="root-summary-divider" /><div><span>LEAF JUNCTIONS</span><strong>{leaves.length}</strong></div></div>
-      {minimumTree.complete ? <div className="level-stack">{levelGroups.map(({ level, nodes }) => <div className="level-row" key={level}><div className="level-label"><span>LEVEL</span><strong>{level}</strong><small>{level === 0 ? 'root' : `${level} edge${level === 1 ? '' : 's'} away`}</small></div><div className="level-nodes">{nodes.map((id) => <div key={id} className={`level-node ${id === root ? 'root-node' : rooted.children[id].length === 0 ? 'leaf-node' : ''}`}><span>{id}</span><div><strong>{locationById[id].name}</strong><small>{rooted.parent[id] ? `Parent · ${rooted.parent[id]} ${locationById[rooted.parent[id]!].name}` : 'Root junction'}</small></div><div className="children-list">{rooted.children[id].length ? <>Children <b>{rooted.children[id].join(', ')}</b></> : <span className="leaf-tag">LEAF</span>}</div></div>)}</div></div>)}</div> : <div className="empty-state"><Network size={22} /> The open network is disconnected, so a spanning tree cannot reach every junction.</div>}
-      <div className="info-callout"><Info size={16} /><span>Rooting changes the parent, child, and level labels. It does not change the spanning-tree edges or their total weight.</span></div>
-    </section>;
-  }
+  const locationSelect = (value: string, setValue: (value: NodeId) => void, label: string) => <label className="form-field"><span>{label}</span><select value={value} onChange={(event) => setValue(event.target.value as NodeId)}>{locations.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.name}</option>)}</select></label>;
 
-  function analyticsPanel() {
-    const edgeData = initialRoads.map((road) => ({ road: road.id, minutes: road.minutes, open: roads.find((item) => item.id === road.id)?.open ?? false })).sort((a, b) => a.minutes - b.minutes || a.road.localeCompare(b.road));
-    const journey = dijkstra(roads, 'A', 'G');
-    const compare = [{ name: 'Fastest · Dijkstra', minutes: journey.distance }, { name: 'A-B-D-F-G', minutes: pathMinutes(roads, ['A', 'B', 'D', 'F', 'G']) }, { name: 'A-C-E-G', minutes: pathMinutes(roads, ['A', 'C', 'E', 'G']) }];
-    const totals = [{ name: 'Full network', weight: originalWeight }, { name: 'Minimum tree', weight: minimumTree.total }];
-    const closure = initialRoads.map((road) => ({ name: road.id, impact: dijkstra(initialRoads.map((edge) => edge.id === road.id ? { ...edge, open: false } : edge), 'A', 'G').distance - dijkstra(initialRoads, 'A', 'G').distance }));
-    return <section className="analytics-view"><div className="analytics-intro"><div><span className="section-eyebrow">NETWORK INTELLIGENCE</span><h2>Analytics & comparison</h2><p>Charts are calculated from the current simulation graph and its assumed travel times.</p></div><span className="live-badge"><i /> MODEL DATA</span></div><Suspense fallback={<div className="panel chart-loading">Preparing calculated charts…</div>}><AnalyticsCharts edgeData={edgeData} compare={compare} totals={totals} closure={closure} savings={savings} /></Suspense></section>;
-  }
-  function learningPanel() {
-    const concepts = [
-      ['Weighted graph', 'A network where edges carry values. Here, vertices are junctions and edge weights are assumed road travel times in minutes. Example: B–C has weight 1.'],
-      ['Tree and spanning tree', 'A tree is connected and has no cycles. A spanning tree includes every vertex. Seven junctions therefore need exactly six tree edges.'],
-      ['Minimum spanning tree', 'A spanning tree with the lowest possible total edge weight. Kruskal and Prim both find weight 17 on this sample graph, saving 67.9% versus all 11 roads.'],
-      ['Dijkstra', 'Finds a minimum-total-weight route from one source to other vertices when edge weights are non-negative. A to G is A → C → B → D → E → F → G = 17 minutes.'],
-      ['Kruskal', 'Sort edges by weight and use Union–Find to accept edges that connect separate components. Reject an edge if it creates a cycle.'],
-      ['Prim', 'Start with one vertex, then grow one connected tree by choosing its cheapest edge to an unvisited vertex.'],
-      ['Rooted tree', 'Choose a vertex as the root. Levels count tree edges from that root. With D as root here, the tree height is 3.'],
-      ['Why shortest path and MST differ', 'A shortest path connects one origin to one destination. An MST connects all vertices with minimum total edge weight. The shortest-path tree is not generally the minimum spanning tree.'],
-    ];
-    return <section className="learn-view"><div className="analytics-intro"><div><span className="section-eyebrow">DISCRETE MATHEMATICS · FIELD NOTES</span><h2>Graph theory, in this project</h2><p>Explore the ideas behind the dashboard, using its actual junctions and road weights.</p></div><BookOpen size={26} /></div><div className="concept-grid">{concepts.map(([title, body], index) => <article className="panel concept-card" key={title}><div className="concept-number">{String(index + 1).padStart(2, '0')}</div><h3>{title}</h3><p>{body}</p></article>)}</div><div className="scope-banner"><ShieldCheck size={20} /><div><strong>Academic simulation · not live navigation</strong><p>The map is schematic, roads are modeled as undirected, and travel times are assumed values. Real-world routing needs a mapped road graph and current validated travel-time data.</p></div></div><section className="panel validation-panel"><div className="chart-heading"><div><h3>Algorithm validation</h3><p>Expected outcomes recalculated from the model data</p></div><span className={`validation-total ${checklist.every((item) => item.value) ? 'all-valid' : ''}`}>{checklist.filter((item) => item.value).length} / {checklist.length} checks</span></div><div className="validation-grid">{checklist.map((item) => <div key={item.label} className={item.value ? 'validation-pass' : 'validation-fail'}><span>{item.value ? <Check size={14} /> : <X size={14} />}</span>{item.label}</div>)}</div></section></section>;
-  }
+  const mapPanel = (props: { title?: string; subtitle?: string; route?: RouteResult | null; showSensors?: boolean; compact?: boolean }) => <section className="surface map-card"><div className="surface-head"><div><div className="surface-title"><MapPinned size={16} /><h2>{props.title ?? 'Bengaluru corridor · road network'}</h2><span className="map-real-pill">{network.source === 'openstreetmap' ? 'REAL ROAD GEOMETRY' : 'MODEL CONNECTORS'}</span></div><p>{props.subtitle ?? 'Silk Board · Agara · HSR Layout · Ibbaluru · Bellandur · Marathahalli'}</p></div><div className="map-actions"><button className="button button-quiet" onClick={refreshOsm} disabled={loadingNetwork}><RefreshCw size={13} className={loadingNetwork ? 'spin' : ''} /> Refresh OSM</button><button className="icon-button" onClick={() => setMapFilters([])} title="Clear map filters"><SlidersHorizontal size={14} /></button></div></div><div className="map-filter-bar">{[['normal', 'Normal'], ['moderate', 'Moderate'], ['heavy', 'Heavy'], ['severe', 'Severe'], ['closed', 'Closed']].map(([id, label]) => <button key={id} className={`filter-chip ${mapFilters.includes(id) ? 'filter-selected' : ''}`} onClick={() => toggleFilter(id)}><i style={{ background: conditionColors[id] }} />{label}</button>)}<span className="filter-divider" /><span className="map-traffic-source">{trafficSource}</span></div><TrafficMap network={network} route={props.route?.segments ?? []} incidents={incidents} sensors={props.showSensors ? sensorResult : null} sensorSites={sensorSites} selectedRoad={selectedRoad} onRoadSelect={selectRoad} onJunctionSelect={useJunction} filterConditions={mapFilters} showSensors={props.showSensors} compact={props.compact} /></section>;
 
-  function overviewView() {
-    const overallRoute = dijkstra(roads, 'A', 'G');
-    const isClosed = roads.some((road) => !road.open);
-    return <>
-      <div className="overview-intro"><div><span className="section-eyebrow">BENGALURU · SILK BOARD ↔ MARATHAHALLI</span><h2>Traffic Network Optimization</h2><p>Explore how graph algorithms find efficient routes and resilient network backbones.</p></div><button className="button button-subtle" onClick={() => changeView('learn')}><CircleHelp size={15} /> Project guide</button></div>
-      <div className="stat-grid">{statCard('Junctions', '07', 'Vertices in the model', Network, 'blue')}{statCard('Road links', '11', `${roads.filter((road) => road.open).length} currently open`, Map, 'cyan')}{statCard('Fastest A → G', fmt(overallRoute.distance), overallRoute.path.length ? routeLabel(overallRoute.path) : 'No open route', Zap, 'green')}{statCard('MST backbone', minimumTree.complete ? `${minimumTree.total} min` : '—', minimumTree.complete ? `${savings!.toFixed(1)}% less total weight` : 'Network disconnected', GitBranch, 'amber')}</div>
-      <div className="overview-grid"><div>{mapPanel({ title: 'Interactive road network', subtitle: 'Silk Board to Marathahalli · schematic, not geographically accurate', route: overallRoute.path, large: true })}<div className="map-bottom-note"><Info size={14} /> {isClosed ? 'Road closures are active. Open the simulator to restore or change the network.' : 'Simulation uses assumed model times · No live traffic data'} <button onClick={() => changeView('closures')}>Manage roads <ArrowRight size={13} /></button></div></div><aside className="overview-side"><div className="panel quick-route"><div className="panel-heading compact-heading"><div><span className="section-eyebrow">QUICK ROUTE</span><h2>Plan a journey</h2></div><Route size={18} /></div><div className="quick-route-fields">{locationSelect(start, setStart, 'From')}{locationSelect(destination, setDestination, 'To')}</div><div className="quick-route-result"><div><span>FASTEST ROUTE</span><b>{fmt(overallRoute.distance)}</b></div><p>{routeLabel(overallRoute.path)}</p><button className="button button-primary full-button" onClick={() => changeView('route')}>Explore route <ArrowRight size={15} /></button></div></div>
-        <div className="panel summary-panel"><div className="panel-heading compact-heading"><div><span className="section-eyebrow">NETWORK SNAPSHOT</span><h2>At a glance</h2></div><Activity size={18} /></div><div className="summary-line"><span>All-road weight</span><b>{originalWeight} min</b></div><div className="summary-line"><span>Minimum tree weight</span><b>{minimumTree.complete ? `${minimumTree.total} min` : 'Disconnected'}</b></div><div className="summary-line"><span>Possible weight savings</span><b className="text-green">{savings !== null ? `${savings.toFixed(1)}%` : '—'}</b></div><button className="text-button" onClick={() => changeView('analytics')}>View network analytics <ArrowRight size={14} /></button></div>
-        <div className="learn-card"><div className="learn-card-icon"><Sparkles size={17} /></div><div><strong>Two problems, different tools</strong><p>Dijkstra finds a fast trip. An MST connects the whole network efficiently.</p><button className="text-button" onClick={() => changeView('learn')}>Learn the difference <ArrowRight size={13} /></button></div></div>
-      </aside></div>
-      <div className="overview-lower"><div><span className="section-eyebrow">ALGORITHM TOOLKIT</span><h2>Explore the network from every angle</h2></div><div className="toolkit-grid"><button className="toolkit-card" onClick={() => changeView('route')}><span className="toolkit-icon blue"><Route size={18} /></span><strong>Shortest path</strong><small>Compare Dijkstra and BFS</small><ArrowRight size={15} /></button><button className="toolkit-card" onClick={() => changeView('trees')}><span className="toolkit-icon green"><GitBranch size={18} /></span><strong>Spanning trees</strong><small>Explore Kruskal and Prim</small><ArrowRight size={15} /></button><button className="toolkit-card" onClick={() => changeView('closures')}><span className="toolkit-icon amber"><TrafficCone size={18} /></span><strong>Closure simulator</strong><small>Model a road disruption</small><ArrowRight size={15} /></button><button className="toolkit-card" onClick={() => changeView('rooted')}><span className="toolkit-icon purple"><TreePine size={18} /></span><strong>Rooted hierarchy</strong><small>Inspect levels and leaves</small><ArrowRight size={15} /></button></div></div>
-    </>;
-  }
+  const routeCard = (result: RouteResult | null, compact = false) => <div className={`route-result-card ${compact ? 'route-result-compact' : ''}`}><div className="route-result-top"><div><span className="panel-overline">{algorithm === 'astar' ? 'A* GEOGRAPHIC SEARCH' : 'DIJKSTRA SHORTEST PATH'} · {preference.toUpperCase()}</span><strong>{routeLoading ? 'Calculating…' : timeLabel(result?.travelTimeMinutes)}</strong></div><span className="route-result-icon"><Route size={17} /></span></div>{result?.reachable ? <><div className="route-places">{result.path.map((code, index) => { const place = locations.find((item) => item.id === code); return <span className="route-place" key={`${code}-${index}`}><b>{place?.id ?? code}</b><small>{place?.name ?? 'Road junction'}</small>{index < result.path.length - 1 && <i />}</span>; })}</div><div className="route-result-meta"><span><Compass size={12} />{(result.distanceM / 1000).toFixed(1)} km</span><span><Clock3 size={12} />Normal model {timeLabel(result.normalTimeMinutes)}</span><span className={routeSavings > 0 ? 'saved-time' : ''}><Zap size={12} />{routeSavings > 0 ? `${routeSavings} min saved` : 'Traffic-aware estimate'}</span><span className="simulation-label">{result.isSimulated ? 'SIMULATED' : result.dataSource.toUpperCase()}</span></div>{result.providerComparison && <div className="provider-comparison"><b>Google Routes traffic-aware check</b><span>{providerMinutes(result.providerComparison.duration) === null ? result.providerComparison.duration : timeLabel(providerMinutes(result.providerComparison.duration))} · {(result.providerComparison.distanceM / 1000).toFixed(1)} km</span><small>External benchmark; local graph estimate remains shown above.</small></div>}</> : <div className="route-no-result"><AlertTriangle size={15} />{routeLoading ? 'The route is being recalculated.' : 'No open route connects the selected junctions. Check active closures.'}</div>}{result?.providerWarning && <div className="inline-warning">{result.providerWarning}</div>}</div>;
 
-  function renderView() {
-    if (activeView === 'overview') return overviewView();
-    if (activeView === 'route') return <div className="workspace-grid">{mapPanel({ title: 'Route visualization', subtitle: `${start} ${locationById[start].name} to ${destination} ${locationById[destination].name}`, route: selectedPath, current: routeCurrent, visited: routeVisited })}{dijkstraPanel()}</div>;
-    if (activeView === 'trees') return <div className="workspace-grid">{mapPanel({ title: 'Spanning tree visualization', subtitle: `${treeAlgorithm === 'kruskal' ? 'Kruskal' : 'Prim'} · ${visibleTreeEdges.length} of 6 edges selected`, tree: visibleTreeEdges })}{treePanel()}</div>;
-    if (activeView === 'closures') return <div className="closure-view"><div className="workspace-grid">{mapPanel({ title: 'Road closure map', subtitle: 'Click a road or use its toggle to open and close it', route: dijkstra(roads, 'A', 'G').path, closures: true })}{closurePanel()}</div></div>;
-    if (activeView === 'rooted') return <div className="workspace-grid">{mapPanel({ title: 'Rooted tree map', subtitle: `Minimum spanning tree · rooted at ${root} ${locationById[root].name}`, tree: minimumTree.edges, root, levels: rooted.levels })}{rootedPanel()}</div>;
-    if (activeView === 'analytics') return analyticsPanel();
-    return learningPanel();
-  }
+  const routePanel = <div className="module-grid route-grid">{mapPanel({ title: 'Route map · traffic-aware path', subtitle: `${start} ${getJunction(network, start)?.name ?? ''} ? ${destination} ${getJunction(network, destination)?.name ?? ''}`, route: routeResult })}<section className="surface panel-column"><div className="surface-head"><div><div className="surface-title"><Route size={16} /><h2>Journey planner</h2></div><p>Dijkstra or A* on the current weighted road graph.</p></div><span className={`mini-state ${apiOnline ? 'mini-connected' : ''}`}>{apiOnline ? 'API CONNECTED' : 'LOCAL FALLBACK'}</span></div><div className="panel-form">{locationSelect(start, setStart, 'Starting location')}{locationSelect(destination, setDestination, 'Destination')}<div className="field-row"><label className="form-field"><span>Search algorithm</span><select value={algorithm} onChange={(event) => setAlgorithm(event.target.value as 'dijkstra' | 'astar')}><option value="dijkstra">Dijkstra · shortest travel time</option><option value="astar">A* · geographic heuristic</option></select></label><label className="form-field"><span>Route preference</span><select value={preference} onChange={(event) => setPreference(event.target.value as 'fastest' | 'shortest')}><option value="fastest">Fastest estimated time</option><option value="shortest">Shortest distance</option></select></label></div><label className="form-field"><span>Travel mode</span><select value={travelMode} onChange={(event) => setTravelMode(event.target.value)}><option value="driving">Driving</option><option value="cycling">Cycling · modeled</option><option value="walking">Walking · modeled</option></select></label><button className="button button-primary button-wide" onClick={routeRequest} disabled={routeLoading || start === destination}><Route size={15} /> Calculate optimized route <ArrowRight size={15} /></button></div>{routeCard(routeResult)}<div className="step-trace"><div className="section-heading"><div><span className="panel-overline">ALGORITHM EXECUTION</span><h3>{algorithm === 'astar' ? 'A* search' : 'Dijkstra'} · visited junctions</h3></div><span className="step-count">{routeResult?.steps.length ?? 0} steps</span></div><div className="trace-list">{routeResult?.steps.slice(0, 10).map((step, index) => <div className={`trace-row ${index === 0 ? 'trace-highlight' : ''}`} key={`${step.current}-${index}`}><b>{String(index + 1).padStart(2, '0')}</b><span>{locations.find((item) => item.id === step.current)?.name ?? `OSM node ${step.current}`}</span><small>{step.visitedCount} visited</small><strong>{`${step.cost.toFixed(1)} ${step.costUnit}`}</strong></div>)}{!routeResult?.steps.length && <div className="empty-hint">Choose a trip to see the algorithm's visited-node trace.</div>}</div><p className="muted-note">A* uses straight-line distance as an admissible geographic heuristic. Route cost uses current edge travel-time estimates.</p></div></section></div>;
 
-  const presentationRoute = dijkstra(initialRoads, 'A', 'G');
-  const validationRoute = dijkstra(initialRoads, 'A', 'G');
-  const validationKruskal = kruskal(initialRoads);
-  const validationPrim = prim(initialRoads, 'A');
-  const closedBdNetwork = initialRoads.map((road) => road.id === 'BD' ? { ...road, open: false } : road);
-  const closedBdRoute = dijkstra(closedBdNetwork, 'A', 'G');
-  const allSingleClosuresAreSafe = initialRoads.every((closedRoad) => {
-    const scenario = initialRoads.map((road) => road.id === closedRoad.id ? { ...road, open: false } : road);
-    const result = dijkstra(scenario, 'A', 'G');
-    return result.path.every((id, index) => index === 0 || scenario.some((road) => road.open && ((road.a === result.path[index - 1] && road.b === id) || (road.b === result.path[index - 1] && road.a === id))));
-  });
-  const checklist = [
-    { label: 'Dijkstra A → G · path and 17 min', value: validationRoute.distance === 17 && validationRoute.path.join('') === 'ACBDEFG' },
-    { label: 'Kruskal MST weight = 17', value: validationKruskal.total === 17 },
-    { label: 'Prim MST weight = 17', value: validationPrim.total === 17 },
-    { label: 'MST contains six roads', value: validationKruskal.edges.length === 6 },
-    { label: 'Rooted tree at D · height 3', value: rootTree(validationKruskal.edges, 'D').height === 3 },
-    { label: 'Close B–D · A → G = 19 min', value: closedBdRoute.distance === 19 },
-    { label: 'Closed roads never appear in routes', value: allSingleClosuresAreSafe },
-    { label: 'Alternative A–B–D–F–G = 19 min', value: pathMinutes(initialRoads, ['A', 'B', 'D', 'F', 'G']) === 19 },
-    { label: 'Alternative A–C–E–G = 20 min', value: pathMinutes(initialRoads, ['A', 'C', 'E', 'G']) === 20 },
-  ];
+  const detailCard = selectedFeature && <div className="road-detail-card"><div className="road-detail-heading"><div><span className="panel-overline">SELECTED ROAD</span><strong>{selectedFeature.name}</strong></div><button className="icon-button" onClick={() => setSelectedRoad(null)} aria-label="Close road details"><X size={14} /></button></div><div className="road-detail-metrics"><div><span>Speed</span><b>{selectedFeature.speedKph ? `${selectedFeature.speedKph} km/h` : 'Unavailable'}</b></div><div><span>Travel estimate</span><b>{timeLabel(selectedFeature.estimatedTravelTimeMinutes)}</b></div><div><span>Distance</span><b>{(selectedFeature.distanceM / 1000).toFixed(2)} km</b></div><div><span>Condition</span><b className={`condition-text condition-${selectedFeature.condition}`}>{selectedFeature.closed ? 'Closed' : selectedFeature.condition}</b></div></div><div className="detail-source">Source: {selectedFeature.source} · Updated {timeSince(selectedFeature.lastUpdated)}{selectedFeature.isSimulated ? ' · simulated, not live' : ''}</div><div className="speed-editor"><span>Simulate traffic speed</span><div><input type="range" min="5" max="80" value={simulationSpeed} onChange={(event) => { setSimulationSpeed(Number(event.target.value)); }} /><b>{simulationSpeed} km/h</b></div><button className="button button-quiet" disabled={!canOperate} onClick={async () => { const base = network.geojson.features.find((item) => item.properties.roadId === selectedFeature.roadId)?.properties.baseSpeedKph ?? selectedFeature.speedKph ?? simulationSpeed; setSimulationFactors((current) => ({ ...current, [selectedFeature.roadId]: base / Math.max(simulationSpeed, 1) })); try { await api.setTraffic(selectedFeature.roadId, simulationSpeed, 'simulation'); await loadNetwork(); announce('Speed scenario saved to the demo API and route calculations updated.'); } catch (error) { if (error instanceof ApiError && error.status === 403) announce(`Local scenario applied to route calculations only. ${error.message}`); else { setNetwork((current) => ({ ...current, traffic: current.traffic.map((item) => item.roadId === selectedFeature.roadId ? { ...item, speedKph: simulationSpeed, source: 'Local simulation input', isSimulated: true, condition: simulationSpeed < 15 ? 'heavy' : 'moderate' } : item) })); announce('Local traffic simulation updated. Start Django to save this scenario.'); } } }}><Activity size={13} />Apply simulation</button></div></div>;
 
-  return <div className={`app-shell ${presentation ? 'presentation-shell' : ''}`}>
-    {!presentation && <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}><div className="brand"><div className="brand-mark"><Activity size={19} /></div><div><strong>FLOWSTATE</strong><small>GRAPH LAB</small></div><button className="sidebar-close icon-button" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={18} /></button></div><div className="sidebar-label">WORKSPACE</div><nav>{navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${view === id ? 'nav-active' : ''}`} onClick={() => changeView(id)}><Icon size={17} /><span>{label}</span>{view === id && <i />}</button>)}</nav><div className="sidebar-spacer" /><div className="sidebar-status"><span className="status-orb" /><div><strong>Simulation active</strong><small>Local model · no live feed</small></div></div><div className="sidebar-footer"><span>DISCRETE MATHEMATICS</span><small>University project prototype</small></div></aside>}
-    <main className="main-area"><header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="breadcrumbs"><span>Flowstate</span><ChevronRight size={13} /><strong>{sectionTitle()}</strong></div></div><div className="topbar-right"><span className="simulation-pill"><i /> SIMULATION MODE</span><button className="button button-presentation" onClick={openPresentation}><Play size={14} fill="currentColor" /> Presentation mode</button><button className="avatar" title="Graph theory project">GT</button></div></header>
-      <div className="page-content"><div className="page-kicker"><span>TRAFFIC NETWORK OPTIMIZATION</span><span className="page-kicker-line" /><span className="page-kicker-location">BENGALURU, INDIA</span></div>{renderView()}{notice && <div className="toast"><Check size={15} />{notice}</div>}<footer className="page-footer"><span>FLOWSTATE GRAPH LAB</span><span>Academic simulation · Assumed travel times · No live traffic feed</span><button onClick={() => changeView('learn')}>Method & assumptions <ArrowRight size={13} /></button></footer></div>
-    </main>
-    {mobileNav && !presentation && <button className="mobile-backdrop" onClick={() => setMobileNav(false)} aria-label="Close menu" />}
-    {presentation && <div className="presentation-overlay"><header className="presentation-header"><div className="brand"><div className="brand-mark"><Activity size={19} /></div><div><strong>FLOWSTATE</strong><small>PROJECT PRESENTATION</small></div></div><div className="presentation-progress">{slides.map((item, index) => <i key={`${item.kicker}-${index}`} className={index <= slide ? 'done' : ''} />)}</div><button className="icon-button" onClick={() => { setPresentation(false); setPlaying(false); }} aria-label="Exit presentation"><X size={19} /></button></header><div className="presentation-content"><div className="presentation-copy"><span className="section-eyebrow">{slides[slide].kicker} · {String(slide + 1).padStart(2, '0')} / 08</span><h1>{slides[slide].title}</h1><p>{slides[slide].body}</p><div className="presentation-calcs">{slide === 0 && <><span>7 junctions</span><span>11 roads</span><span>3 graph algorithms</span></>}{slide === 1 && <><span>Undirected edges</span><span>Weight · minutes</span><span>All roads open</span></>}{slide === 2 && <><span>A → C → B → D → E → F → G</span><span>17 min</span></>}{(slide === 3 || slide === 4) && <><span>6 selected edges</span><span>MST total · 17</span></>}{slide === 5 && <><span>Close B–D</span><span>Route becomes 19 min</span></>}{slide === 6 && <><span>Height · 3</span><span>Root · Ibbaluru</span></>}{slide === 7 && <><span>Route planning</span><span>Network design</span></>}</div><div className="presentation-controls"><button className="button button-subtle" disabled={slide === 0} onClick={() => setSlide((value) => Math.max(0, value - 1))}><ChevronLeft size={16} /> Previous</button><button className="button button-primary" onClick={() => slide === slides.length - 1 ? setPresentation(false) : setSlide((value) => Math.min(slides.length - 1, value + 1))}>{slide === slides.length - 1 ? 'Finish' : 'Next'} <ChevronRight size={16} /></button><button className="icon-button presentation-play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? 'Pause presentation' : 'Play presentation'}>{playing ? <Pause size={16} /> : <Play size={16} />}</button></div></div><div className="presentation-map">{map({ roadsOverride: slide === 5 ? initialRoads.map((road) => road.id === 'BD' ? { ...road, open: false } : road) : initialRoads, route: slide === 2 ? presentationRoute.path : slide === 5 ? dijkstra(initialRoads.map((road) => road.id === 'BD' ? { ...road, open: false } : road), 'A', 'G').path : [], tree: slide === 3 || slide === 4 || slide === 6 ? kruskal(initialRoads).edges : [], root: slide === 6 ? 'D' : undefined, levels: slide === 6 ? rootTree(kruskal(initialRoads).edges, 'D').levels : undefined })}<div className="presentation-map-label"><span className="live-badge"><i /> SIMULATION NETWORK</span><b>{slides[slide].kicker}</b></div></div></div><div className="presentation-bottom"><span>SMART CITY TRAFFIC NETWORK OPTIMIZATION USING TREES AND ALGORITHMS</span><span>Use arrow controls to navigate the demonstration</span></div></div>}
+  const overview = <><div className="welcome-row"><div><span className="eyebrow">BENGALURU · OUTER RING ROAD CORRIDOR</span><h2>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, operator</h2><p>Monitor corridor conditions, model incidents, and plan a resilient sensor backbone.</p></div><button className="button button-outline" onClick={() => setPresentation(true)}><Play size={13} /> Start briefing</button></div><div className="metric-grid">{[
+    { label: 'Road segments', value: numberLabel(network.traffic.length), note: network.source === 'openstreetmap' ? 'OpenStreetMap corridor' : 'Study corridor model', icon: MapPinned, color: 'blue' },
+    { label: 'Active incidents', value: activeIncidents.length, note: `${blockedRoadCount} blocked roads`, icon: Siren, color: activeIncidents.length ? 'red' : 'green' },
+    { label: 'Fastest A ? G', value: timeLabel(routeResult?.travelTimeMinutes), note: routeResult?.isSimulated ? 'Modeled traffic estimate' : 'Traffic-aware estimate', icon: Zap, color: 'cyan' },
+    { label: 'Sensor backbone', value: sensorResult ? money(sensorResult.totalInstallCost) : '—', note: sensorResult?.connected ? `${sensorResult.connectionCount} connections · Prim/Kruskal` : 'Optimize candidate sensors', icon: Radio, color: 'amber' },
+  ].map((item) => <div className="metric-card" key={item.label}><div className={`metric-icon ${item.color}`}><item.icon size={17} /></div><div><span>{item.label}</span><b>{item.value}</b><small>{item.note}</small></div></div>)}</div><div className="dashboard-columns"><div className="dashboard-main">{mapPanel({ title: 'Corridor traffic map', subtitle: 'Real streets shown when an OSM extract is available; otherwise labeled corridor-model links', route: routeResult })}{detailCard}<div className="source-card"><div className="source-card-icon"><Info size={16} /></div><div><b>Data provenance</b><p>{sourceLine} · Traffic: {trafficSource}. Traffic is treated as observed only when source records identify it as non-simulated.</p></div><button className="button button-quiet" onClick={() => setPage('analytics')}>View details <ArrowRight size={13} /></button></div><div className="dashboard-quick-actions"><button onClick={() => setPage('routes')}><Route size={16} /><span><b>Optimize a route</b><small>Dijkstra · A*</small></span><ArrowRight size={13} /></button><button onClick={() => setPage('incidents')}><Siren size={16} /><span><b>Report an incident</b><small>{activeIncidents.length} active reports</small></span><ArrowRight size={13} /></button><button onClick={() => setPage('sensors')}><Radio size={16} /><span><b>Plan sensor network</b><small>Prim · Kruskal</small></span><ArrowRight size={13} /></button></div></div><aside className="dashboard-aside"><section className="surface mini-route-panel"><div className="surface-head"><div><span className="panel-overline">TRAFFIC-AWARE ROUTE</span><h3>Silk Board ? Marathahalli</h3></div><Zap size={15} /></div>{routeCard(routeResult, true)}<button className="button button-primary button-wide" onClick={() => setPage('routes')}>Open route optimizer <ArrowRight size={14} /></button></section><section className="surface incident-mini"><div className="section-heading"><div><span className="panel-overline">INCIDENT DESK</span><h3>Recent reports</h3></div><button className="text-link" onClick={() => setPage('incidents')}>View all <ArrowRight size={12} /></button></div>{activeIncidents.length ? activeIncidents.slice(0, 4).map((incident) => <div className="incident-mini-row" key={incident.id}><span className={`severity-dot severity-${incident.severity}`} /><div><b>{incident.kind.replace('_', ' ')}</b><small>{incident.location_name} · {timeSince(incident.reported_at)}</small></div><span className={`severity-label severity-${incident.severity}`}>{incident.severity}</span></div>) : <div className="empty-hint"><CheckCircle2 size={15} />No active incidents reported.</div>}<button className="button button-quiet button-wide" onClick={() => setPage('incidents')}><Siren size={13} /> Open incident management</button></section><section className="surface source-mini"><div className="section-heading"><div><span className="panel-overline">OPERATIONS READINESS</span><h3>Feed and system status</h3></div><Radio size={15} /></div><div className="data-source-row"><span className="provider-mark osm">OSM</span><div><b>Road map</b><small>{network.sourceLabel}</small></div><span className="provider-state">{network.source === 'openstreetmap' ? 'LOADED' : 'MODEL'}</span></div><div className="data-source-row"><span className="provider-mark sim">API</span><div><b>Operations API</b><small>{apiOnline ? `${health?.database ?? 'Database'} · connected` : 'Offline · changes stay in this browser'}</small></div><span className={`provider-state ${apiOnline ? '' : 'provider-sim'}`}>{apiOnline ? 'READY' : 'OFFLINE'}</span></div><div className="data-source-row"><span className="provider-mark sim">TT</span><div><b>TomTom traffic</b><small>{health?.providers.tomtomTraffic.configured ? 'Key configured · no automatic polling' : 'Not configured · requires backend key'}</small></div><span className={`provider-state ${health?.providers.tomtomTraffic.configured ? '' : 'provider-sim'}`}>{health?.providers.tomtomTraffic.configured ? 'KEY SET' : 'SETUP'}</span></div><div className="data-source-row"><span className="provider-mark sim">G</span><div><b>Google Routes</b><small>{health?.providers.googleRoutes.configured ? (health.providers.selectedProvider === 'google_routes' ? 'Active · ETA comparison enabled' : 'Key set · select as active provider') : 'Not configured · requires backend key'}</small></div><span className={`provider-state ${health?.providers.googleRoutes.configured ? '' : 'provider-sim'}`}>{health?.providers.googleRoutes.configured && health.providers.selectedProvider === 'google_routes' ? 'ACTIVE' : health?.providers.googleRoutes.configured ? 'KEY SET' : 'SETUP'}</span></div><small className="last-update">Traffic in use: {network.traffic.filter((road) => !road.isSimulated).length} observed / {network.traffic.length} segments · updated {timeSince(dataUpdatedAt)}</small></section></aside></div></>;
+
+  const incidentsPage = <div className="module-grid incident-grid"><div className="stack-column">{mapPanel({ title: 'Incident map · affected roads', subtitle: 'Active events and closures are highlighted on the corridor' })}{detailCard}<section className="surface"><div className="surface-head"><div><div className="surface-title"><AlertTriangle size={16} /><h2>Active and recent incidents</h2></div><p>Resolve an incident to reopen its road for route calculations.</p></div><span className="count-pill">{activeIncidents.length} ACTIVE</span></div><div className="incident-list">{incidents.length ? incidents.map((incident) => <article key={incident.id} className={`incident-row ${incident.status === 'resolved' ? 'incident-resolved' : ''}`}><div className={`incident-kind-icon severity-${incident.severity}`}><AlertCircle size={16} /></div><div className="incident-row-main"><div><b>{incident.kind.replace('_', ' ')}</b><span className={`severity-label severity-${incident.severity}`}>{incident.severity}</span><span className={`incident-status ${incident.status}`}>{incident.status}</span></div><small>{incident.location_name}{incident.road_id ? ` · ${incident.road_id}` : ''} · {timeSince(incident.reported_at)}</small><p>{incident.description}</p></div>{incident.status === 'active' && <button className="button button-quiet" disabled={!canOperate} onClick={() => resolveIncident(incident)}><CheckCircle2 size={13} /> Resolve</button>}</article>) : <div className="empty-state"><Shield size={24} /><b>All clear</b><span>No incidents reported in this session.</span></div>}</div></section></div><section className="surface form-surface"><div className="surface-head"><div><div className="surface-title"><Siren size={16} /><h2>Report an incident</h2></div><p>Reports are stored in the backend when available.</p></div></div><form className="panel-form" onSubmit={handleIncidentSubmit}><label className="form-field"><span>Incident type</span><select value={incidentKind} onChange={(event) => setIncidentKind(event.target.value)}><option value="accident">Road accident</option><option value="construction">Road construction</option><option value="waterlogging">Waterlogging</option><option value="breakdown">Broken-down vehicle</option><option value="closure">Road closure</option><option value="signal_failure">Traffic signal failure</option></select></label><label className="form-field"><span>Severity</span><select value={incidentSeverity} onChange={(event) => setIncidentSeverity(event.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>{locationSelect(incidentLocation, setIncidentLocation, 'Nearest junction')}<label className="form-field"><span>Affected road segment</span><select value={incidentRoadId} onChange={(event) => setIncidentRoadId(event.target.value)}><option value="">Not linked to a road</option>{network.traffic.map((road) => <option value={road.roadId} key={road.roadId}>{road.name} · {road.roadId}</option>)}</select></label><label className="form-field"><span>Description</span><textarea value={incidentDescription} onChange={(event) => setIncidentDescription(event.target.value)} placeholder="Describe what happened and any visible road impact…" rows={4} maxLength={500} /></label><div className="form-tip"><Info size={14} />Critical accidents and road closures block their linked segment in the route planner.</div><button className="button button-danger button-wide" disabled={!canOperate || incidentSaving}><Siren size={14} />{incidentSaving ? 'Submitting…' : 'Submit incident report'}</button>{!canOperate && <small className="form-tip-text">Viewer role cannot submit operator reports.</small>}</form></section></div>;
+
+  const sensorPage = <div className="module-grid sensor-grid"><div className="stack-column">{mapPanel({ title: 'Sensor infrastructure · candidate connections', subtitle: 'Purple links show the selected minimum-cost sensor backbone', route: null, showSensors: true })}<section className="surface sensor-edge-table"><div className="surface-head"><div><div className="surface-title"><Network size={16} /><h2>Candidate sensor connections</h2></div><p>Disable an option to model a construction or access constraint.</p></div><span className="count-pill">{sensorConnections.filter((item) => item.connected).length} AVAILABLE</span></div><div className="sensor-connection-list">{sensorConnections.slice(0, 21).map((connection) => <label className="sensor-connection-row" key={connection.id}><input type="checkbox" checked={connection.connected} disabled={!canOperate} onChange={() => applySensorSites(sensorSites, sensorConnections.map((item) => item.id === connection.id ? { ...item, connected: !item.connected } : item))} /><span>{connection.a} ? {connection.b}</span><small>{(connection.distance_m / 1000).toFixed(1)} km</small><b>{money(connection.install_cost)}</b></label>)}</div></section></div><section className="surface sensor-config"><div className="surface-head"><div><div className="surface-title"><Radio size={16} /><h2>Sensor network planner</h2></div><p>Optimize monitoring connectivity, not driving routes.</p></div></div><div className="sensor-explainer"><Info size={15} /><span>An MST is the least-cost connected backbone for sensors. It does not calculate fastest road routes.</span></div><div className="panel-form"><div className="section-heading"><div><span className="panel-overline">CANDIDATE JUNCTIONS</span><p>Select where monitoring equipment could be placed.</p></div></div><div className="candidate-grid">{sensorSites.map((site) => <label className={`candidate-site ${site.candidate ? 'candidate-active' : ''}`} key={site.code}><input type="checkbox" checked={site.candidate} disabled={!canOperate || sensorSites.filter((item) => item.candidate).length <= 2 && site.candidate} onChange={() => applySensorSites(sensorSites.map((item) => item.id === site.id ? { ...item, candidate: !item.candidate } : item))} /><span>{site.code}</span><b>{site.name}</b></label>)}</div><div className="field-row"><label className="form-field"><span>MST algorithm</span><select value={sensorAlgorithm} onChange={(event) => setSensorAlgorithm(event.target.value as 'prim' | 'kruskal')}><option value="kruskal">Kruskal · Union–Find</option><option value="prim">Prim · grow from first site</option></select></label><label className="form-field"><span>Redundancy</span><select value={String(redundancy)} onChange={(event) => setRedundancy(event.target.value === 'true')}><option value="false">Minimum backbone</option><option value="true">Add backup links</option></select></label></div><label className="range-field"><span>Installation cost scenario <b>{costMultiplier.toFixed(1)}×</b></span><input type="range" min="0.5" max="2" step="0.1" value={costMultiplier} disabled={!canOperate} onChange={(event) => setCostMultiplier(Number(event.target.value))} /><small>Adjust modeled connection costs to explore budget sensitivity.</small></label>{sensorResult && <><div className="sensor-result-grid"><div><span>INSTALLATION</span><b>{money(sensorResult.totalInstallCost)}</b></div><div><span>YEARLY MAINTENANCE</span><b>{money(sensorResult.maintenanceCostYear)}</b></div><div><span>CONNECTED</span><b>{sensorResult.connectionCount} / {Math.max(0, sensorResult.siteCount - 1)} links</b></div><div><span>BACKUP LINKS</span><b>{sensorResult.redundantConnections.length}</b></div></div><div className="savings-banner"><div><span>ALL-CANDIDATE CONNECTIONS</span><b>{money(sensorResult.alternativeConnectionCost)}</b></div><ArrowRight size={15} /><div><span>BACKBONE SAVING</span><b>{money(sensorResult.savings)}</b></div></div><div className="algorithm-trace-list"><div className="section-heading"><b>{sensorAlgorithm === 'prim' ? 'Prim growth' : 'Kruskal edge decisions'}</b><span>{sensorStep}/{sensorResult.trace.length} steps</span></div>{sensorResult.trace.slice(0, sensorStep).map((item, index) => <div className={`algorithm-trace-row ${item.accepted ? 'trace-accepted' : 'trace-rejected'}`} key={`${item.edgeId}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><b>{sensorConnections.find((connection) => String(connection.id) === item.edgeId)?.a ?? item.edgeId} {item.accepted ? 'kept' : 'skipped'}</b><small>{item.reason}</small></div>)}<div className="trace-controls"><button className="button button-quiet" disabled={sensorStep <= 0} onClick={() => setSensorStep((n) => Math.max(0, n - 1))}>Previous step</button><button className="button button-primary" disabled={sensorStep >= sensorResult.trace.length} onClick={() => setSensorStep((n) => Math.min(sensorResult.trace.length, n + 1))}>Show next edge <ArrowRight size={13} /></button></div></div></>}</div></section></div>;
+
+  const signalsPage = <div className="module-grid signal-grid"><section className="surface form-surface"><div className="surface-head"><div><div className="surface-title"><Signal size={16} /><h2>Junction queue assessment</h2></div><p>Enter observed or simulated queue conditions for an advisory score.</p></div></div><form className="panel-form" onSubmit={submitSignal}>{locationSelect(signalInput.junction_code, (value) => setSignalInput((current) => ({ ...current, junction_code: value, junction_name: locations.find((place) => place.id === value)?.name ?? value })), 'Junction')}{[['vehicle_count', 'Vehicle count', 0, 2000], ['average_wait_seconds', 'Average wait (seconds)', 0, 600], ['queue_length_m', 'Queue length (metres)', 0, 1000], ['cycle_duration_seconds', 'Current signal cycle (seconds)', 20, 300]].map(([key, label, min, max]) => <label className="form-field" key={key}><span>{label}</span><input type="number" min={Number(min)} max={Number(max)} value={signalInput[key as keyof SignalInput] as number} onChange={(event) => setSignalInput((current) => ({ ...current, [key]: Number(event.target.value) }))} /></label>)}<div className="form-tip"><Info size={14} />The recommendation is an educational model only. It cannot connect to or control Bengaluru signal systems.</div><button className="button button-primary button-wide" disabled={!canOperate || signalSaving}><Gauge size={15} />{signalSaving ? 'Analyzing…' : 'Analyze junction conditions'}</button></form></section><section className="surface signal-result"><div className="surface-head"><div><span className="panel-overline">SIGNAL TIMING ADVISOR</span><h2>{signalResult?.measurement.junction_name ?? signalInput.junction_name}</h2><p>Based on vehicle counts, waiting time, queue length and cycle.</p></div><span className={`severity-label severity-${signalResult?.level === 'critical' ? 'critical' : signalResult?.level === 'high' ? 'high' : 'medium'}`}>{signalResult?.level ?? 'pending'}</span></div>{signalResult ? <><div className="congestion-meter"><div className="meter-score"><strong>{signalResult.congestionScore}</strong><span>/ 100</span></div><div className="meter-bar"><i style={{ width: `${signalResult.congestionScore}%` }} /></div><small>Modeled congestion pressure score · {signalResult.source}</small></div><div className="timing-recommendation"><div><Timer size={18} /><span>Suggested cycle</span><b>{signalResult.recommendedCycleSeconds} sec</b></div><div><Activity size={18} /><span>Green phase estimate</span><b>{signalResult.suggestedGreenSeconds} sec</b></div></div><div className="recommendation-note"><Sparkles size={15} /><p>{signalResult.explanation} Review local engineering and safety standards before making any signal-timing changes.</p></div></> : <div className="empty-state">Enter junction measurements to calculate an advisory congestion score.</div>}</section></div>;
+
+  const analyticsPage = <Suspense fallback={<div className="surface chart-loading">Loading traffic analytics…</div>}><AnalyticsDashboard analytics={analytics} network={network} route={routeResult} incidents={activeIncidents} sensor={sensorResult} /></Suspense>;
+
+  const educationPage = <div className="education-page"><div className="welcome-row"><div><span className="eyebrow">GRAPH THEORY · TRAFFIC SYSTEMS</span><h2>Algorithm field guide</h2><p>Understand which graph problem each tool solves—and which it does not.</p></div><span className="simulation-status"><span className="status-dot" /> MODEL-BASED EXAMPLES</span></div><div className="education-grid">{[
+    ['Weighted road graph', 'Vertices represent junctions. Edges represent road segments. Each edge has geometry, distance, direction rules and a travel-time estimate.', 'For example, a road segment can have a modeled weight of 4.2 minutes based on length and estimated speed.'],
+    ['Dijkstra', 'Finds the lowest total non-negative edge cost from an origin. This prototype uses estimated travel time as the route cost by default.', 'The algorithm runs from the selected origin; the trace shows visited graph nodes and distance updates.'],
+    ['A* pathfinding', 'Uses an admissible geographic heuristic to prioritize promising junctions while preserving shortest-path correctness.', 'Here the heuristic is straight-line distance scaled by the minimum edge cost per metre.'],
+    ['Kruskal and Prim', 'Build a minimum spanning tree for sensor infrastructure. The cost is the modeled installation cost of each possible sensor link.', 'Both algorithms connect candidate sites for minimum total installation cost; optional backup links add redundancy.'],
+    ['Rooted tree', 'A spanning tree can be oriented from any selected root. Parent, child, leaf and level describe the monitoring hierarchy.', 'Changing the root changes the hierarchy, not the underlying sensor backbone.'],
+    ['Traffic provenance', 'OSM contributes road geometry, not traffic speed. Google Routes or TomTom data is only shown as provider-derived when a backend key is configured.', 'Without provider credentials, traffic is simulation or manual entry and is always labeled with its source.'],
+  ].map(([title, body, example], index) => <article className="surface education-card" key={title}><span className="education-number">{String(index + 1).padStart(2, '0')}</span><h3>{title}</h3><p>{body}</p><div><b>In this prototype</b><span>{example}</span></div></article>)}</div><div className="validation-strip"><div><CheckCircle2 size={17} /><span>Working algorithm checks</span></div>{['Dijkstra 17 min', 'MST 17', 'B-D closure 19 min', 'Root height 3'].map((item) => <span className="validation-chip" key={item}>{item}</span>)}</div></div>;
+
+  const activeView = displayedPage === 'overview' ? overview : displayedPage === 'routes' ? routePanel : displayedPage === 'incidents' ? incidentsPage : displayedPage === 'sensors' ? sensorPage : displayedPage === 'signals' ? signalsPage : displayedPage === 'analytics' ? analyticsPage : educationPage;
+
+  return <div className="smartflow-shell"><aside className={`smart-sidebar ${mobileNav ? 'sidebar-open' : ''}`}><div className="smart-brand"><span className="smart-logo"><Activity size={19} /></span><div><b>SMARTFLOW</b><small>BENGALURU · TRAFFIC OPS</small></div><button className="sidebar-close icon-button" onClick={() => setMobileNav(false)}><X size={16} /></button></div><div className="sidebar-section-label">CONTROL SYSTEM</div>{['OPERATIONS', 'NETWORK DESIGN', 'INTELLIGENCE'].map((group) => <div className="nav-group" key={group}><span>{group}</span>{nav.filter((item) => item.group === group).map((item) => <button key={item.id} className={`smart-nav-item ${page === item.id ? 'nav-selected' : ''}`} onClick={() => { setPage(item.id); setMobileNav(false); }}><item.icon size={16} /><span>{item.title}</span>{item.id === 'incidents' && activeIncidents.length > 0 && <i>{activeIncidents.length}</i>}</button>)}</div>)}<div className="sidebar-grow" /><div className="sidebar-api-state"><div className={`api-state-light ${apiOnline ? 'api-ok' : ''}`} /><div><b>{apiOnline ? 'Backend connected' : 'Offline demo mode'}</b><small>{apiOnline ? 'Django REST · local API' : 'Local fallback · start Django API'}</small></div><button onClick={() => loadNetwork()} title="Retry backend connection"><RefreshCw size={13} /></button></div><div className="sidebar-foot"><b>SMART CITY LEARNING SIMULATION</b><span>Graph Theory · Bengaluru corridor</span></div></aside>{mobileNav && <button className="sidebar-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
+    <main className="smart-main">{header}<div className="content-area"><div className="data-ribbon"><span><MapPinned size={13} /> MAP DATA · {network.sourceLabel}</span><i /><span><Radio size={13} /> TRAFFIC · {trafficSource}</span><i /><span><Clock3 size={13} /> UPDATED · {timeSince(dataUpdatedAt)}</span><div className="data-ribbon-right">{sourceLine}</div></div>{network.refreshError && <div className="message-banner"><Info size={14} />{network.refreshError}</div>}{activeView}{page !== 'overview' && <div className="global-simulation-note"><Info size={13} /> Data source is shown per observation. Simulation inputs are not live traffic measurements. OSM road geometry is separate from traffic data.</div>}<footer className="smart-footer"><span>SMARTFLOW BENGALURU · PROTOTYPE</span><span>Academic simulation · no real signal control</span><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a></footer></div></main>{message && <div className="toast-message"><CheckCircle2 size={16} />{message}</div>}
+    {presentation && <PresentationModal page={presentationSlide} network={network} route={presentationSlide === 2 ? routeResult : null} incidents={incidents} sensors={sensorResult} sensorSites={sensorSites} showSensors={presentationSlide === 3 || presentationSlide === 4} onNext={() => setPresentationSlide((value) => Math.min(7, value + 1))} onBack={() => setPresentationSlide((value) => Math.max(0, value - 1))} onClose={() => setPresentation(false)} />}
   </div>;
 }
+
+function PresentationModal({ page, network, route, incidents, sensors, sensorSites, showSensors, onNext, onBack, onClose }: { page: number; network: NetworkData; route: RouteResult | null; incidents: Incident[]; sensors: SensorResult | null; sensorSites: SensorSite[]; showSensors: boolean; onNext: () => void; onBack: () => void; onClose: () => void }) {
+  const agenda = [
+    ['Introduction', 'A Bengaluru traffic management simulation built around graph theory. Road geometry is from OpenStreetMap when loaded; traffic is separately sourced or simulated.'],
+    ['Road network', 'Inspect named corridor junctions and road geometry on an interactive Leaflet map. Click segments to review their data provenance.'],
+    ['Route optimization', 'Compare Dijkstra and A* under fastest-time and shortest-distance objectives. Disruptions are excluded from route calculations.'],
+    ['Kruskal sensor backbone', 'Kruskal uses installation cost and Union–Find to choose a minimum-cost connected sensor network.'],
+    ['Prim sensor backbone', 'Prim independently grows a minimum spanning tree from a selected candidate junction.'],
+    ['Incidents', 'Report and resolve road incidents. A closure changes the network and triggers a new route calculation.'],
+    ['Analytics', 'Review modeled congestion, route delay, incidents, provider availability and sensor cost.'],
+    ['Conclusion', 'Shortest-path routing and minimum-cost infrastructure planning are different graph problems.'],
+  ];
+  return <div className="briefing-backdrop"><div className="briefing-modal"><header><div className="smart-brand"><span className="smart-logo"><Activity size={18} /></span><div><b>SMARTFLOW</b><small>OPERATOR BRIEFING</small></div></div><div className="briefing-progress">{agenda.map((_, index) => <i key={index} className={index <= page ? 'progress-done' : ''} />)}</div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="briefing-body"><div><span className="eyebrow">PROJECT OVERVIEW · {String(page + 1).padStart(2, '0')} / 08</span><h2>{agenda[page][0]}</h2><p>{agenda[page][1]}</p><div className="briefing-tags"><span>7 corridor junctions</span><span>Local graph algorithms</span><span>Simulation mode</span></div><div className="briefing-controls"><button className="button button-quiet" disabled={page === 0} onClick={onBack}>? Previous</button><button className="button button-primary" onClick={page === 7 ? onClose : onNext}>{page === 7 ? 'Finish briefing' : 'Continue'} <ArrowRight size={14} /></button></div></div><div className="briefing-map"><TrafficMap network={network} route={route?.segments ?? []} incidents={incidents} sensors={showSensors ? sensors : null} sensorSites={sensorSites} showSensors={showSensors} compact /><div className="briefing-map-source">© OpenStreetMap contributors · {network.sourceLabel}</div></div></div></div></div>;
+}
+
+export default App;
