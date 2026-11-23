@@ -2,11 +2,17 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from unittest.mock import patch
 from .services.algorithms import find_route, sensor_mst
-from .services.network import fallback_network
 
 class RouteAlgorithmTests(TestCase):
     def setUp(self):
-        self.network = fallback_network()
+        # Compact graph fixture for algorithm tests; this data is not used by the application.
+        links = [('A', 'B', 4), ('A', 'C', 2), ('B', 'C', 1), ('B', 'D', 5), ('C', 'D', 8),
+                 ('C', 'E', 10), ('D', 'E', 2), ('D', 'F', 6), ('E', 'F', 3), ('E', 'G', 8), ('F', 'G', 4)]
+        coords = {key: [index * .001, index * .001] for index, key in enumerate('ABCDEFG')}
+        edges = [{'id': f'model-{a}{b}', 'roadId': f'model-{a}{b}', 'name': f'{a}-{b}', 'highway': 'test',
+                  'a': a, 'b': b, 'coordinates': [coords[a], coords[b]], 'distanceM': 1000,
+                  'baseSpeedKph': 20, 'assumedMinutes': minutes, 'oneway': False} for a, b, minutes in links]
+        self.network = {'edges': edges, 'nodes': coords, 'junctions': {}, 'source': 'test fixture'}
 
     def test_dijkstra_default_route_is_17_minutes(self):
         result = find_route(self.network, 'A', 'G')
@@ -43,29 +49,25 @@ class ApiFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    def test_route_endpoint_returns_path_and_algorithm_trace(self):
+    def test_route_endpoint_requires_a_loaded_graph_instead_of_using_a_fixed_corridor(self):
         response = self.client.post('/api/routes/', {
             'start': 'A', 'destination': 'G', 'algorithm': 'astar',
             'travelMode': 'driving', 'preference': 'fastest',
         }, format='json')
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data['reachable'])
-        self.assertEqual(response.data['travelTimeMinutes'], 17)
-        self.assertTrue(response.data['steps'])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No default road area is loaded', response.data['detail'])
 
-    def test_closure_incident_changes_following_route(self):
-        response = self.client.post('/api/incidents/', {
-            'road_id': 'model-BD', 'location_name': 'Agara', 'latitude': 12.92, 'longitude': 77.65,
-            'kind': 'closure', 'severity': 'high', 'description': 'Demonstration closure',
-        }, format='json')
-        self.assertEqual(response.status_code, 201)
-        route = self.client.post('/api/routes/', {
-            'start': 'A', 'destination': 'G', 'algorithm': 'dijkstra',
-            'travelMode': 'driving', 'preference': 'fastest',
-        }, format='json')
-        self.assertEqual(route.status_code, 200)
-        self.assertNotIn('model-BD', {segment['roadId'] for segment in route.data['segments']})
-        self.assertIn('model-BD', route.data['closedRoads'])
+    @patch('traffic.views.get_area_network')
+    def test_closure_scenario_is_saved_and_scoped_to_loaded_osm_roads(self, get_area):
+        get_area.return_value = {'features': {'features': [{'properties': {'roadId': 'osm-way-1'}}]}}
+        body = {'name': 'Bridge closure test', 'bbox': [1, 1, 1.05, 1.05], 'closedRoadIds': ['osm-way-1'], 'start': '10', 'destination': '20'}
+        response = self.client.post('/api/closure-scenarios/', body, format='json')
+        self.assertEqual(response.status_code, 200)
+        latest = self.client.get('/api/closure-scenarios/')
+        self.assertEqual(latest.data['scenario']['closedRoadIds'], ['osm-way-1'])
+        body['closedRoadIds'] = ['made-up-road']
+        invalid = self.client.post('/api/closure-scenarios/', body, format='json')
+        self.assertEqual(invalid.status_code, 400)
 
 
 @override_settings(OSRM_BASE_URL='http://osrm.test', NOMINATIM_USER_AGENT='SmartFlow-tests/1.0')
@@ -118,14 +120,17 @@ class GeoServiceApiTests(TestCase):
     @patch('traffic.services.area_network.get_area_network')
     def test_closing_a_real_graph_road_recalculates_to_an_alternative(self, get_network):
         get_network.return_value = {'edges': [
-            {'id': 'ab', 'roadId': 'road-ab', 'name': 'A-B', 'a': 'A', 'b': 'B', 'distanceM': 2, 'coordinates': [[0, 0], [1, 0]], 'oneway': False},
-            {'id': 'bd', 'roadId': 'road-bd', 'name': 'B-D', 'a': 'B', 'b': 'D', 'distanceM': 2, 'coordinates': [[1, 0], [2, 0]], 'oneway': False},
-            {'id': 'ac', 'roadId': 'road-ac', 'name': 'A-C', 'a': 'A', 'b': 'C', 'distanceM': 3, 'coordinates': [[0, 0], [0, 1]], 'oneway': False},
-            {'id': 'cd', 'roadId': 'road-cd', 'name': 'C-D', 'a': 'C', 'b': 'D', 'distanceM': 4, 'coordinates': [[0, 1], [2, 0]], 'oneway': False},
+            {'id': 'ab', 'roadId': 'road-ab', 'name': 'A-B', 'a': 'A', 'b': 'B', 'distanceM': 2, 'baseSpeedKph': 10, 'coordinates': [[0, 0], [1, 0]], 'oneway': False},
+            {'id': 'bd', 'roadId': 'road-bd', 'name': 'B-D', 'a': 'B', 'b': 'D', 'distanceM': 2, 'baseSpeedKph': 10, 'coordinates': [[1, 0], [2, 0]], 'oneway': False},
+            {'id': 'ac', 'roadId': 'road-ac', 'name': 'A-C', 'a': 'A', 'b': 'C', 'distanceM': 3, 'baseSpeedKph': 100, 'coordinates': [[0, 0], [0, 1]], 'oneway': False},
+            {'id': 'cd', 'roadId': 'road-cd', 'name': 'C-D', 'a': 'C', 'b': 'D', 'distanceM': 4, 'baseSpeedKph': 100, 'coordinates': [[0, 1], [2, 0]], 'oneway': False},
         ]}
         response = self.client.post('/api/network/area/route/', {'bbox': [1, 1, 1.05, 1.05], 'start': 'A', 'destination': 'D'}, format='json')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['distanceMeters'], 4)
+        fastest = self.client.post('/api/network/area/route/', {'bbox': [1, 1, 1.05, 1.05], 'start': 'A', 'destination': 'D', 'preference': 'fastest'}, format='json')
+        self.assertEqual(fastest.data['distanceMeters'], 7)
+        self.assertEqual(fastest.data['preference'], 'fastest')
         closed = self.client.post('/api/network/area/route/', {'bbox': [1, 1, 1.05, 1.05], 'start': 'A', 'destination': 'D', 'closedRoadIds': ['road-ab']}, format='json')
         self.assertTrue(closed.data['reachable'])
         self.assertEqual(closed.data['distanceMeters'], 7)

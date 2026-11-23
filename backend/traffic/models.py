@@ -78,6 +78,24 @@ class SensorConnection(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['site_a', 'site_b'], name='unique_sensor_connection')]
 
+class SensorPlanningPlan(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE)
+    name = models.CharField(max_length=120)
+    bbox = models.JSONField(default=list)
+    junction_ids = models.JSONField(default=list)
+    config = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+class RoadClosureScenario(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE)
+    name = models.CharField(max_length=120, default='Road closure scenario')
+    bbox = models.JSONField(default=list)
+    closed_road_ids = models.JSONField(default=list)
+    route_start = models.CharField(max_length=40, blank=True)
+    route_destination = models.CharField(max_length=40, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
 class SignalMeasurement(models.Model):
     junction_code = models.CharField(max_length=16)
     junction_name = models.CharField(max_length=140)

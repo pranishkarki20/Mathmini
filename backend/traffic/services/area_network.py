@@ -1,6 +1,7 @@
 """Cached, bounded Overpass road extracts and graph analyses for a chosen map area."""
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import networkx as nx
@@ -35,7 +36,52 @@ def _cache_file(bbox):
     return folder / f'{key}.json'
 
 
+def _overpass_query(bbox):
+    south, west, north, east = bbox
+    query = (f'[out:json][timeout:20];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)$"]'
+             f'({south},{west},{north},{east});out body geom;')
+    endpoints = list(dict.fromkeys([settings.OVERPASS_URL, *getattr(settings, 'OVERPASS_FALLBACK_URLS', [])]))
+    errors = []
+    for endpoint in endpoints:
+        try:
+            response = requests.post(endpoint, data={'data': query}, timeout=(5, 22), headers={
+                'User-Agent': 'SmartFlowRoadNetworkPlatform/1.0 (OpenStreetMap road analysis)', 'Accept': 'application/json',
+            })
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get('remark'):
+                raise ValueError(payload['remark'])
+            if not isinstance(payload.get('elements'), list):
+                raise ValueError('Overpass returned an invalid elements list.')
+            return payload
+        except (requests.RequestException, ValueError) as error:
+            errors.append(f'{endpoint}: {error}')
+    raise AreaNetworkError('; '.join(errors))
+
+
+def _fetch_tiled_area(bbox):
+    south, west, north, east = bbox
+    mid_lat, mid_lon = (south + north) / 2, (west + east) / 2
+    tiles = [
+        [south, west, mid_lat, mid_lon], [south, mid_lon, mid_lat, east],
+        [mid_lat, west, north, mid_lon], [mid_lat, mid_lon, north, east],
+    ]
+    elements = {}
+    errors = []
+    for tile in tiles:
+        try:
+            payload = _overpass_query(tile)
+            for item in payload['elements']:
+                elements[(item.get('type'), item.get('id'))] = item
+        except AreaNetworkError as error:
+            errors.append(str(error))
+    if errors:
+        raise AreaNetworkError('Overpass failed for one or more smaller map tiles: ' + ' | '.join(errors))
+    return {'elements': list(elements.values())}
+
+
 def _summarize(data, bbox):
+    retrieved_at = datetime.now(timezone.utc).isoformat()
     graph = nx.Graph()
     for edge in data['edges']:
         graph.add_edge(edge['a'], edge['b'], roadId=edge['roadId'])
@@ -50,6 +96,9 @@ def _summarize(data, bbox):
         critical = list(nx.articulation_points(graph))
     except nx.NetworkXError:
         critical = []
+    bridge_pairs = {frozenset(pair) for pair in nx.bridges(graph)} if graph else set()
+    critical_roads = sorted({str(edge['roadId']) for edge in data['edges'] if frozenset((edge['a'], edge['b'])) in bridge_pairs})
+    high_degree = sorted((node for node, degree in degrees.items() if degree >= 4), key=lambda node: (-degrees[node], str(node)))
     data['junctions'] = junctions
     data['metrics'] = {
         'roadSegments': len(data['edges']),
@@ -59,10 +108,14 @@ def _summarize(data, bbox):
         'connectedAreas': nx.number_connected_components(graph) if graph else 0,
         'criticalJunctions': len(critical),
         'criticalJunctionIds': [str(node) for node in critical],
+        'criticalRoadSegments': len(critical_roads),
+        'criticalRoadIds': critical_roads,
+        'highDegreeJunctionIds': [str(node) for node in high_degree[:50]],
     }
     data['bbox'] = bbox
     data['source'] = 'openstreetmap'
-    data['sourceLabel'] = 'OpenStreetMap via Overpass · cached extract'
+    data['retrievedAt'] = retrieved_at
+    data['sourceLabel'] = 'OpenStreetMap via Overpass · retrieved ' + retrieved_at
     return data
 
 
@@ -71,19 +124,21 @@ def get_area_network(raw_bbox, refresh=False):
     path = _cache_file(bbox)
     if path.exists() and not refresh:
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            cached = json.loads(path.read_text(encoding='utf-8'))
+            if not cached.get('retrievedAt'):
+                cached['retrievedAt'] = datetime.now(timezone.utc).isoformat()
+            if 'sourceLabel' not in cached:
+                cached['sourceLabel'] = 'OpenStreetMap via Overpass · retrieved ' + cached['retrievedAt']
+            return cached
         except (OSError, json.JSONDecodeError):
             pass
-    south, west, north, east = bbox
-    query = (f'[out:json][timeout:25];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)$"]'
-             f'({south},{west},{north},{east});out body geom;')
     try:
-        response = requests.post(settings.OVERPASS_URL, data={'data': query}, timeout=35, headers={
-            'User-Agent': 'SmartFlowRoadNetworkPlatform/1.0', 'Accept': 'application/json',
-        })
-        response.raise_for_status()
-        data = _summarize(convert_overpass(response.json()), bbox)
-    except (requests.RequestException, ValueError, KeyError) as error:
+        try:
+            payload = _overpass_query(bbox)
+        except AreaNetworkError:
+            payload = _fetch_tiled_area(bbox)
+        data = _summarize(convert_overpass(payload), bbox)
+    except (AreaNetworkError, requests.RequestException, ValueError, KeyError) as error:
         if path.exists():
             try:
                 cached = json.loads(path.read_text(encoding='utf-8'))
@@ -96,38 +151,47 @@ def get_area_network(raw_bbox, refresh=False):
     return data
 
 
-def route_in_area(raw_bbox, start, end, closed_road_ids=None):
+def route_in_area(raw_bbox, start, end, closed_road_ids=None, preference='shortest'):
     data = get_area_network(raw_bbox)
     graph = nx.MultiDiGraph()
     closed = set(closed_road_ids or [])
+    if preference not in ('shortest', 'fastest'):
+        raise AreaNetworkError('Route preference must be shortest or fastest.')
     graph.add_nodes_from(node for edge in data['edges'] for node in (edge['a'], edge['b']))
     edge_lookup = {edge['id']: edge for edge in data['edges'] if edge['roadId'] not in closed}
+    def route_cost(edge):
+        distance = float(edge['distanceM'])
+        return distance if preference == 'shortest' else distance / max(float(edge.get('baseSpeedKph', 20)), 1)
     for edge in edge_lookup.values():
-        graph.add_edge(edge['a'], edge['b'], key=edge['id'], weight=edge['distanceM'], roadId=edge['roadId'], roadName=edge['name'], coordinates=edge['coordinates'])
+        graph.add_edge(edge['a'], edge['b'], key=edge['id'], weight=route_cost(edge), distanceM=edge['distanceM'], roadId=edge['roadId'], roadName=edge['name'], coordinates=edge['coordinates'], baseSpeedKph=edge.get('baseSpeedKph', 20))
         if not edge['oneway']:
-            graph.add_edge(edge['b'], edge['a'], key=f"{edge['id']}:reverse", weight=edge['distanceM'], roadId=edge['roadId'], roadName=edge['name'], coordinates=list(reversed(edge['coordinates'])))
+            graph.add_edge(edge['b'], edge['a'], key=f"{edge['id']}:reverse", weight=route_cost(edge), distanceM=edge['distanceM'], roadId=edge['roadId'], roadName=edge['name'], coordinates=list(reversed(edge['coordinates'])), baseSpeedKph=edge.get('baseSpeedKph', 20))
     start, end = str(start), str(end)
     if start not in graph or end not in graph:
         raise AreaNetworkError('Choose junctions from the currently loaded road network area.')
     try:
         nodes = nx.shortest_path(graph, start, end, weight='weight')
     except (nx.NetworkXNoPath, nx.NodeNotFound):
-        return {'reachable': False, 'segments': [], 'distanceMeters': 0, 'closedRoadIds': sorted(closed), 'message': 'These junctions are disconnected by the selected road closures.'}
+        return {'reachable': False, 'segments': [], 'distanceMeters': 0, 'estimatedDurationMinutes': None, 'closedRoadIds': sorted(closed), 'message': 'These junctions are disconnected by the selected road closures.'}
     segments = []
     for a, b in zip(nodes, nodes[1:]):
         options = graph[a][b].values()
         selected = min(options, key=lambda item: item['weight'])
-        segments.append({'roadId': selected['roadId'], 'name': selected['roadName'], 'coordinates': selected['coordinates'], 'distanceMeters': selected['weight']})
-    return {'reachable': True, 'segments': segments, 'distanceMeters': round(sum(item['distanceMeters'] for item in segments)), 'closedRoadIds': sorted(closed), 'junctionPath': nodes}
+        segments.append({'roadId': selected['roadId'], 'name': selected['roadName'], 'coordinates': selected['coordinates'], 'distanceMeters': selected['distanceM'], 'estimatedDurationMinutes': selected['distanceM'] / max(float(selected.get('baseSpeedKph', 20)), 1) * 0.06})
+    return {'reachable': True, 'preference': preference, 'segments': segments, 'distanceMeters': round(sum(item['distanceMeters'] for item in segments)), 'estimatedDurationMinutes': round(sum(item['estimatedDurationMinutes'] for item in segments), 1), 'closedRoadIds': sorted(closed), 'junctionPath': nodes}
 
 
-def plan_infrastructure(raw_bbox, junction_ids, estimated_cost_per_km):
+def plan_infrastructure(raw_bbox, junction_ids, estimated_cost_per_km, algorithm='kruskal', objective='distance'):
     data = get_area_network(raw_bbox)
     road_graph = nx.Graph()
     road_lookup = {}
     for edge in data['edges']:
-        road_graph.add_edge(edge['a'], edge['b'], weight=edge['distanceM'])
-        road_lookup[frozenset((edge['a'], edge['b']))] = edge
+        pair = frozenset((edge['a'], edge['b']))
+        current = road_lookup.get(pair)
+        if current is None or edge['distanceM'] < current['distanceM']:
+            weight = edge['distanceM'] if objective == 'distance' or estimated_cost_per_km == 0 else edge['distanceM'] / 1000 * estimated_cost_per_km
+            road_graph.add_edge(edge['a'], edge['b'], weight=weight)
+            road_lookup[pair] = edge
     selected = list(dict.fromkeys(str(value) for value in junction_ids))
     if len(selected) < 2 or any(node not in road_graph for node in selected):
         raise AreaNetworkError('Select at least two junctions from the loaded road network.')
@@ -143,7 +207,7 @@ def plan_infrastructure(raw_bbox, junction_ids, estimated_cost_per_km):
         for destination in selected[index + 1:]:
             if destination in distances[source]:
                 candidates.add_edge(source, destination, weight=distances[source][destination])
-    tree = nx.minimum_spanning_tree(candidates, weight='weight')
+    tree = nx.minimum_spanning_tree(candidates, weight='weight', algorithm=algorithm)
     connections = []
     for source, destination, values in tree.edges(data=True):
         road_path = paths[source][destination]
@@ -152,7 +216,7 @@ def plan_infrastructure(raw_bbox, junction_ids, estimated_cost_per_km):
             edge = road_lookup[frozenset((a, b))]
             coordinates = edge['coordinates'] if str(edge['a']) == str(a) else list(reversed(edge['coordinates']))
             segments.append({'roadId': edge['roadId'], 'name': edge['name'], 'coordinates': coordinates, 'distanceMeters': edge['distanceM']})
-        distance = round(values['weight'])
+        distance = round(sum(item['distanceMeters'] for item in segments))
         connections.append({'fromJunction': source, 'toJunction': destination, 'distanceMeters': distance,
             'estimatedInstallationCost': round(distance / 1000 * float(estimated_cost_per_km)), 'segments': segments})
     return {'connected': len(tree.edges) == len(selected) - 1, 'selectedJunctions': selected, 'connections': connections,

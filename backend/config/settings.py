@@ -58,6 +58,7 @@ REST_FRAMEWORK = {
 }
 ALLOW_DEMO_WRITES = os.getenv('ALLOW_DEMO_WRITES', 'true').lower() == 'true' and DEBUG
 OVERPASS_URL = os.getenv('OVERPASS_URL', 'https://overpass-api.de/api/interpreter')
+OVERPASS_FALLBACK_URLS = [url.strip() for url in os.getenv('OVERPASS_FALLBACK_URLS', 'https://ovp.dresel.systems/api-as/interpreter').split(',') if url.strip()]
 OSM_AUTO_FETCH = os.getenv('OSM_AUTO_FETCH', 'true').lower() == 'true'
 NOMINATIM_USER_AGENT = os.getenv('NOMINATIM_USER_AGENT', 'SmartFlowRoadNetworkPlatform/1.0 (OpenStreetMap-based route planning)')
 OSRM_BASE_URL = os.getenv('OSRM_BASE_URL', 'https://router.project-osrm.org')

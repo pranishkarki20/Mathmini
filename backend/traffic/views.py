@@ -10,11 +10,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.response import Response
 
-from .models import Incident, RoadSegment, SensorConnection, SensorSite, SignalMeasurement, TrafficObservation
+from .models import Incident, RoadClosureScenario, RoadSegment, SensorConnection, SensorSite, SensorPlanningPlan, SignalMeasurement, TrafficObservation
 from .permissions import OperatorWritePermission
 from .serializers import IncidentSerializer, OptimizeSensorSerializer, SensorConnectionSerializer, SensorSiteSerializer, SignalInputSerializer, TrafficInputSerializer
 from .services.algorithms import find_route, sensor_mst
-from .services.network import CORRIDOR, get_network
+from .services.network import get_network
 from .services.providers import provider_status, tomtom_flow
 from .services.osm_services import GeoServiceError, get_osrm_route, search_nominatim
 from .services.area_network import AreaNetworkError, get_area_network, plan_infrastructure, route_in_area
@@ -39,12 +39,49 @@ class AreaRouteRequestSerializer(serializers.Serializer):
     start = serializers.CharField(max_length=40)
     destination = serializers.CharField(max_length=40)
     closedRoadIds = serializers.ListField(child=serializers.CharField(max_length=80), required=False, max_length=100)
+    preference = serializers.ChoiceField(choices=['shortest', 'fastest'], default='shortest')
 
 
 class InfrastructurePlanSerializer(serializers.Serializer):
     bbox = serializers.ListField(child=serializers.FloatField(), min_length=4, max_length=4)
     junctionIds = serializers.ListField(child=serializers.CharField(max_length=40), min_length=2, max_length=30)
-    estimatedCostPerKm = serializers.FloatField(min_value=0, max_value=1000000000)
+    estimatedCostPerKm = serializers.FloatField(min_value=0)
+    algorithm = serializers.ChoiceField(choices=['prim', 'kruskal'], default='kruskal')
+    objective = serializers.ChoiceField(choices=['distance', 'estimated_cost'], default='distance')
+
+class SensorPlanSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    bbox = serializers.ListField(child=serializers.FloatField(), min_length=4, max_length=4)
+    junctionIds = serializers.ListField(child=serializers.CharField(max_length=40), max_length=200)
+    config = serializers.JSONField()
+
+    def validate_bbox(self, value):
+        try:
+            from .services.area_network import _validate_bbox
+            return _validate_bbox(value)
+        except AreaNetworkError as error:
+            raise serializers.ValidationError(str(error)) from error
+
+    def validate_config(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('config must be a JSON object.')
+        for key in ('quantity', 'deviceUnit', 'installUnit', 'powerUnit', 'networkUnit', 'cablingUnit', 'civilUnit', 'software', 'annualMaintenance', 'annualConnectivity', 'contingencyPct', 'taxPct', 'costPerKm'):
+            if key in value and (isinstance(value[key], bool) or not isinstance(value[key], (int, float)) or value[key] < 0):
+                raise serializers.ValidationError(f'{key} must be a non-negative number.')
+        return value
+
+class ClosureScenarioSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120, required=False, default='Road closure scenario')
+    bbox = serializers.ListField(child=serializers.FloatField(), min_length=4, max_length=4)
+    closedRoadIds = serializers.ListField(child=serializers.CharField(max_length=80), max_length=100)
+    start = serializers.CharField(max_length=40, required=False, allow_blank=True, default='')
+    destination = serializers.CharField(max_length=40, required=False, allow_blank=True, default='')
+    def validate_bbox(self, value):
+        try:
+            from .services.area_network import _validate_bbox
+            return _validate_bbox(value)
+        except AreaNetworkError as error:
+            raise serializers.ValidationError(str(error)) from error
 
 def _latest_observations():
     result = {}
@@ -139,7 +176,7 @@ def area_route_view(request):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     try:
-        result = route_in_area(data['bbox'], data['start'], data['destination'], data.get('closedRoadIds', []))
+        result = route_in_area(data['bbox'], data['start'], data['destination'], data.get('closedRoadIds', []), data['preference'])
     except AreaNetworkError as error:
         return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)
@@ -153,17 +190,65 @@ def infrastructure_plan_view(request):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     try:
-        result = plan_infrastructure(data['bbox'], data['junctionIds'], data['estimatedCostPerKm'])
+        result = plan_infrastructure(data['bbox'], data['junctionIds'], data['estimatedCostPerKm'], data['algorithm'], data['objective'])
     except AreaNetworkError as error:
         return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)
 
+@api_view(['GET', 'POST'])
+@permission_classes([OperatorWritePermission])
+def sensor_plans_view(request):
+    owner = request.user if request.user.is_authenticated else None
+    if request.method == 'GET':
+        plan = SensorPlanningPlan.objects.filter(owner=owner).order_by('-updated_at').first()
+        if not plan:
+            return Response({'plan': None})
+        return Response({'plan': {'id': plan.id, 'name': plan.name, 'bbox': plan.bbox, 'junctionIds': plan.junction_ids, 'config': plan.config, 'updatedAt': plan.updated_at.isoformat()}})
+    serializer = SensorPlanSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    try:
+        network = get_area_network(data['bbox'])
+        valid_junctions = {str(item['id']) for item in network.get('junctions', [])}
+        if not set(data['junctionIds']).issubset(valid_junctions):
+            return Response({'detail': 'Saved sensor locations must be actual intersections from the selected OpenStreetMap extract.'}, status=status.HTTP_400_BAD_REQUEST)
+        saved = SensorPlanningPlan.objects.create(owner=owner, name=data['name'], bbox=data['bbox'], junction_ids=data['junctionIds'], config=data['config'])
+    except AreaNetworkError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+    except (TypeError, ValueError) as error:
+        return Response({'detail': f'Invalid sensor plan data: {error}'}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'id': saved.id, 'name': saved.name, 'updatedAt': saved.updated_at.isoformat()}, status=status.HTTP_201_CREATED)
+
+@api_view(['GET', 'POST'])
+@permission_classes([OperatorWritePermission])
+def closure_scenarios_view(request):
+    owner = request.user if request.user.is_authenticated else None
+    if request.method == 'GET':
+        scenario = RoadClosureScenario.objects.filter(owner=owner).order_by('-updated_at').first()
+        if not scenario: return Response({'scenario': None})
+        return Response({'scenario': {'id': scenario.id, 'name': scenario.name, 'bbox': scenario.bbox,
+            'closedRoadIds': scenario.closed_road_ids, 'start': scenario.route_start,
+            'destination': scenario.route_destination, 'updatedAt': scenario.updated_at.isoformat()}})
+    serializer = ClosureScenarioSerializer(data=request.data); serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    try:
+        network = get_area_network(data['bbox'])
+    except AreaNetworkError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+    valid_roads = {str(feature['properties']['roadId']) for feature in network['features']['features']}
+    if not set(data['closedRoadIds']).issubset(valid_roads):
+        return Response({'detail': 'Scenario closures must reference roads in the selected OSM extract.'}, status=status.HTTP_400_BAD_REQUEST)
+    scenario, _ = RoadClosureScenario.objects.update_or_create(owner=owner, bbox=data['bbox'], defaults={
+        'name': data['name'], 'closed_road_ids': data['closedRoadIds'], 'route_start': data['start'], 'route_destination': data['destination'],
+    })
+    return Response({'id': scenario.id, 'name': scenario.name, 'updatedAt': scenario.updated_at.isoformat()}, status=status.HTTP_200_OK)
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def route_view(request):
-    start = request.data.get('start', 'A'); end = request.data.get('destination', 'G')
-    if start not in CORRIDOR or end not in CORRIDOR:
-        return Response({'detail': 'Select valid corridor junction codes A–G.'}, status=status.HTTP_400_BAD_REQUEST)
+    start = request.data.get('start'); end = request.data.get('destination')
+    if not isinstance(start, str) or not isinstance(end, str) or not start or not end:
+        return Response({'detail': 'Provide start and destination node IDs from a loaded road graph.'}, status=status.HTTP_400_BAD_REQUEST)
     if start == end:
         return Response({'detail': 'Choose two different junctions.'}, status=status.HTTP_400_BAD_REQUEST)
     algorithm = request.data.get('algorithm', 'dijkstra')
@@ -176,6 +261,8 @@ def route_view(request):
     if preference not in ('fastest', 'shortest'):
         return Response({'detail': 'Preference must be fastest or shortest.'}, status=status.HTTP_400_BAD_REQUEST)
     network = get_network()
+    if start not in network.get('nodes', {}) or end not in network.get('nodes', {}):
+        return Response({'detail': 'No default road area is loaded. Use the bounded area route endpoint or OSRM place route service.'}, status=status.HTTP_400_BAD_REQUEST)
     observations = _latest_observations()
     closures = _active_closures()
     # Request-scoped simulations never overwrite operator or provider observations.

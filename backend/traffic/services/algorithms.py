@@ -4,7 +4,7 @@ import math
 
 import networkx as nx
 
-from .network import CORRIDOR, haversine
+from .network import haversine
 
 def _edge_weight(edge, factors):
     factor = max(0.25, min(5.0, float(factors.get(edge['roadId'], 1.0))))
@@ -56,37 +56,38 @@ def _heuristic(network, node, target_node, min_minutes_per_meter):
 def find_route(network, start_code, end_code, algorithm='dijkstra', closed_roads=None, factors=None, mode='driving', preference='fastest'):
     closed_roads = set(closed_roads or [])
     factors = factors or {}
-    start_location, end_location = CORRIDOR[start_code], CORRIDOR[end_code]
     if preference not in ('fastest', 'shortest'):
         preference = 'fastest'
     graph, edges = _graph(network, closed_roads, factors, mode, preference)
+    coords = network.get('nodes', {})
+    if start_code not in coords or end_code not in coords:
+        return {'path': [], 'segments': [], 'distanceM': 0, 'travelTimeMinutes': None, 'normalTimeMinutes': None, 'reachable': False, 'algorithm': algorithm, 'start': start_code, 'destination': end_code, 'message': 'Choose endpoints from the loaded road graph.'}
+    start_location = {'code': start_code, 'lon': coords[start_code][0], 'lat': coords[start_code][1]}
+    end_location = {'code': end_code, 'lon': coords[end_code][0], 'lat': coords[end_code][1]}
     start, start_coords = _nearest_node(network, {'code': start_code, **start_location})
     end, end_coords = _nearest_node(network, {'code': end_code, **end_location})
     if start == end:
-        return {'path': [start], 'segments': [], 'distanceM': 0, 'travelTimeMinutes': 0, 'normalTimeMinutes': 0, 'steps': [], 'reachable': True, 'algorithm': algorithm, 'start': start_code, 'destination': end_code}
+        return {'path': [start], 'segments': [], 'distanceM': 0, 'travelTimeMinutes': 0, 'normalTimeMinutes': 0, 'reachable': True, 'algorithm': algorithm, 'start': start_code, 'destination': end_code}
     min_ratio = min((edge['cost'] / max(edge['distanceM'], 1) for edge in edges), default=0)
     queue = [(0, 0.0, start)]
-    distance = {start: 0.0}; previous = {}; finalized = set(); steps = []
+    distance = {start: 0.0}; previous = {}; finalized = set()
     while queue:
         _, cost_so_far, node = heapq.heappop(queue)
         if node in finalized or cost_so_far > distance.get(node, math.inf):
             continue
         finalized.add(node)
-        relaxed = []
         adjacent = sorted(graph.out_edges(node, keys=True, data=True), key=lambda item: str(item[2]))
         for _, neighbor, key, data in adjacent:
             candidate = cost_so_far + data['weight']
             if candidate < distance.get(neighbor, math.inf):
                 distance[neighbor] = candidate
                 previous[neighbor] = (node, key, data['road_id'])
-                relaxed.append(data['road_id'])
                 heuristic = 0 if algorithm == 'dijkstra' else _heuristic(network, neighbor, end, min_ratio)
                 heapq.heappush(queue, (candidate + heuristic, candidate, neighbor))
-        steps.append({'current': str(node), 'visitedCount': len(finalized), 'cost': round(cost_so_far, 2), 'costUnit': 'm' if preference == 'shortest' else 'min', 'relaxedRoads': relaxed})
         if node == end:
             break
     if end not in distance:
-        return {'path': [], 'segments': [], 'distanceM': 0, 'travelTimeMinutes': None, 'normalTimeMinutes': None, 'steps': steps, 'reachable': False, 'algorithm': algorithm, 'start': start_code, 'destination': end_code}
+        return {'path': [], 'segments': [], 'distanceM': 0, 'travelTimeMinutes': None, 'normalTimeMinutes': None, 'reachable': False, 'algorithm': algorithm, 'start': start_code, 'destination': end_code}
     path = [end]; segments = []; cursor = end
     while cursor != start:
         parent, key, road_id = previous[cursor]
@@ -106,7 +107,7 @@ def find_route(network, start_code, end_code, algorithm='dijkstra', closed_roads
     actual_travel_time = sum(item['travelTimeMinutes'] for item in segments)
     return {'path': path, 'segments': segments, 'distanceM': round(sum(item['distanceM'] for item in segments)),
         'travelTimeMinutes': round(actual_travel_time, 1), 'normalTimeMinutes': round(normal, 1),
-        'timeSavedMinutes': round(max(0, normal - actual_travel_time), 1), 'delayMinutes': round(max(0, actual_travel_time - normal), 1), 'optimizationCost': round(distance[end], 1), 'preference': preference, 'steps': steps,
+        'timeSavedMinutes': round(max(0, normal - actual_travel_time), 1), 'delayMinutes': round(max(0, actual_travel_time - normal), 1), 'optimizationCost': round(distance[end], 1), 'preference': preference,
         'reachable': True, 'algorithm': algorithm, 'start': start_code, 'destination': end_code,
         'snappedStart': {'lat': start_coords[1], 'lon': start_coords[0]}, 'snappedDestination': {'lat': end_coords[1], 'lon': end_coords[0]}}
 
@@ -115,14 +116,13 @@ def sensor_mst(sites, connections, algorithm='kruskal', redundant=False):
     candidates = [item for item in connections if item['connected']]
     candidates.sort(key=lambda item: (item['installCost'], item['id']))
     site_codes = sorted(site['code'] for site in sites)
-    chosen, trace = [], []
+    chosen = []
     if algorithm == 'prim' and site_codes:
         reached = {site_codes[0]}
         while len(reached) < len(site_codes):
             edge = next((item for item in sorted(candidates, key=lambda e: (e['installCost'], e['id'])) if (item['a'] in reached) != (item['b'] in reached)), None)
             if edge is None: break
             chosen.append(edge); reached.add(edge['b'] if edge['a'] in reached else edge['a'])
-            trace.append({'edgeId': edge['id'], 'accepted': True, 'reason': 'Lowest-cost connection to an unconnected candidate site'})
     else:
         parent = {code: code for code in site_codes}
         def find(code):
@@ -134,7 +134,6 @@ def sensor_mst(sites, connections, algorithm='kruskal', redundant=False):
             accepted = ra != rb
             if accepted:
                 parent[ra] = rb; chosen.append(edge)
-            trace.append({'edgeId': edge['id'], 'accepted': accepted, 'reason': 'Connects separate components' if accepted else 'Rejected: would create a cycle'})
             if len(chosen) == max(len(site_codes) - 1, 0): break
     nx_graph = nx.Graph()
     nx_graph.add_nodes_from(site_codes)
@@ -146,7 +145,7 @@ def sensor_mst(sites, connections, algorithm='kruskal', redundant=False):
     if redundant:
         chosen_ids = {item['id'] for item in chosen}
         backup = [item for item in candidates if item['id'] not in chosen_ids][:max(1, len(site_codes) // 3)]
-    return {'algorithm': algorithm, 'edges': chosen, 'trace': trace, 'totalInstallCost': round(total, 2),
+    return {'algorithm': algorithm, 'edges': chosen, 'totalInstallCost': round(total, 2),
         'maintenanceCostYear': round(sum(item.get('maintenanceCostYear', 0) for item in chosen), 2),
         'siteCount': len(site_codes), 'connectionCount': len(chosen), 'connected': components <= 1,
         'componentCount': components, 'alternativeConnectionCost': round(all_cost, 2),
